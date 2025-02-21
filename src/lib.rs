@@ -9,9 +9,9 @@
 //! The design priorities are:
 //!
 //! - **Ease of use:** Read and write operations are as simple as setting or getting a struct field.
-//! - **Idiomatic Rust:** Define your preferences with clear defaults in an idiomatic way.
 //! - **Safety:** Writes are performed using a temporary file so that crashes won’t leave your data corrupted.
 //! - **Performance:** Reading and writing are optimized for speed.
+//! - **Easy Unit Testing:** The library is designed to play well with your unit tests.
 //!
 //! **Note:** This library is NOT intended to store large quantities of data. All data is cached in memory,
 //! and the entire file is rewritten on each save. Use a full database for heavy data storage.
