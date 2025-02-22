@@ -1,13 +1,10 @@
 A simple, safe, and performant preferences library for Rust applications.
 
-We asked: "How simple can we make reading and writing preferences in Rust?" This is our answer.
-(Oh, and it has to also be performant, testable, thread safe, easy to migrate, and never corrupt your data)
+We asked: "What is the simplest possible API to persist a struct in Rust?" This is our answer.
+(Oh, and it is also be performant, testable, thread safe, easy to migrate, and should never corrupt your data)
 
 *This library was created by Ever Accountable – an app that helps people quit compulsive porn use
-and become the best version of themselves. More information is available at [everaccountable.com](https://everaccountable.com).*
-
-easy_prefs is a simple macro that basically decorates a struct. It makes that
-struct automatically persist its data to disk (in a .toml file).
+and become the best version of themselves. More info at [everaccountable.com](https://everaccountable.com).*
 
 easy_preferences does these things well:
 
@@ -21,8 +18,11 @@ easy_preferences does these things well:
 - **Thread Safety:** Read and write from multiple threads without worry.
 - **Easy Unit Testing:** The library is designed to play well with your unit tests.
 
-**Note:** This library is NOT intended to store large quantities of data. All data is cached in memory,
+### Limitations:
+- NOT intended to store large quantities of data. All data is cached in memory,
 and the entire file is rewritten on each save. Use a full database for heavy data storage.
+- Writes happen on whatever thread you use when you save the data. This is a blocking operation. In the future we may make it save from a background thread.
+- Currently we don't make any guarantee about which version will be written when multiple threads write at the same time.
 
 ## Example
 
@@ -92,7 +92,7 @@ close as possible to just setting and getting fields on a struct. That's it!
 Define a struct, along with default values right there, set a name for the file,
 and optionally names for the fields in the file (for future-proofing).
 
-I went through about 3 different iterations of this library before I landed on this one.
+I went through about 4 different iterations of this library before I landed on this one.
 
 I settled on using a macro because I could define both the struct and and the default
 values all in one place. And because the read and save functions can be made so simple.
