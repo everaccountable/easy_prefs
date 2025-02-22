@@ -27,8 +27,8 @@ use easy_prefs::easy_prefs;
 // Define your preferences in a struct. The default values are specified here.
 easy_prefs! {
     pub struct AppPreferences {
-        /// A boolean preference. This will use the name "notifications" in the .toml file.
-        pub notifications: bool = true,
+        /// A boolean preference. Note the default value is true, and the field name in the file is "notifications"
+        pub notifications: bool = true => "notifications",
         /// Note here that we've specified the name of the field in the file.
         pub username: String = "guest".to_string() => "username",
     },
@@ -95,7 +95,7 @@ liked how cumbersome things felt.
 Reading and writing preferences should be as
 close as possible to just setting and getting fields on a struct. That's it!
 Define a struct, along with default values right there, set a name for the file,
-and optionally names for the fields in the file (for future-proofing).
+and names for the fields in the file (for future-proofing).
 
 I went through about 4 different iterations of this library before I landed on this one.
 
