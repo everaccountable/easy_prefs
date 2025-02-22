@@ -1,7 +1,7 @@
 A simple, safe, and performant preferences library for Rust applications.
 
 We asked: "What is the simplest possible API to persist a struct in Rust?" This is our answer.
-(Oh, and it is also be performant, testable, thread safe, easy to migrate, and should never corrupt your data)
+(Oh, and it is also performant, testable, thread safe, easy to migrate, and should never corrupt your data)
 
 *This library was created by Ever Accountable – an app that helps people quit compulsive porn use
 and become the best version of themselves. More info at [everaccountable.com](https://everaccountable.com).*
