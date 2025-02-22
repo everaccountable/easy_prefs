@@ -18,21 +18,16 @@ easy_preferences does these things well:
 - **Thread Safety:** Read and write from multiple threads without worry.
 - **Easy Unit Testing:** The library is designed to play well with your unit tests.
 
-### Limitations:
-- NOT intended to store large quantities of data. All data is cached in memory,
-and the entire file is rewritten on each save. Use a full database for heavy data storage.
-- Writes happen on whatever thread you use when you save the data. This is a blocking operation. In the future we may make it save from a background thread.
-- Currently we don't make any guarantee about which version will be written when multiple threads write at the same time.
-
 ## Example
 
 ```rust
 use easy_prefs::easy_prefs;
 
+/////////////////////////////////////////////////////////////
+// Define your preferences in a struct. The default values are specified here.
 easy_prefs! {
-    /// Application preferences.
     pub struct AppPreferences {
-        /// A boolean preference. This will use the name "notifications" in the file.
+        /// A boolean preference. This will use the name "notifications" in the .toml file.
         pub notifications: bool = true,
         /// Note here that we've specified the name of the field in the file.
         pub username: String = "guest".to_string() => "username",
@@ -40,6 +35,8 @@ easy_prefs! {
     "app-preferences"  // This is the filename. The directory comes from the directories crate.
 }
 
+/////////////////////////////////////////////////////////////
+// Example of reading and writing:
 fn main() {
     // Load the preferences from disk. If the file doesn't exist, it will 
     // just use default values
@@ -61,6 +58,7 @@ fn main() {
     }
 }
 
+/////////////////////////////////////////////////////////////
 // An example unit test. Notice that we call load_testing()
 // so that the preferences file is temporary and gets cleaned 
 // up after the test.
@@ -76,8 +74,15 @@ mod tests {
         assert_eq!(prefs.get_notifications(), false);
     }
 }
-
 ```
+
+
+### Limitations:
+- NOT intended to store large quantities of data. All data is cached in memory,
+  and the entire file is rewritten on each save. Use a full database for heavy data storage.
+- Writes happen on whatever thread you use when you save the data. This is a blocking operation. In the future we may make it save from a background thread.
+- Currently we don't make any guarantee about which version will be written when multiple threads write at the same time.
+
 
 ## Origin Story of easy_prefs, by Tyler Patterson
 Common things should be simple! Writing and reading user preferences is a common task
