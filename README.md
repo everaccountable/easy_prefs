@@ -1,4 +1,4 @@
-A simple, safe, and performant preferences library for Rust applications.
+A simple to use, safe, and lightweight way to save preferences (or really anything you would keep in a struct).
 
 We asked: "What is the simplest possible API to persist a struct in Rust?" This is our answer.
 (Oh, and it is also performant, testable, thread safe, easy to migrate, and should never corrupt your data)

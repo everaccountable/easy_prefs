@@ -1,9 +1,9 @@
 [package]
 name = "easy_prefs"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Tyler Patterson <tyler@everaccountable.com>"]
-description = "The simplest API we could think of to persist data to disk. Basically just decorate a struct with a macro, then data is saved when you make changes to it. BONUS: This is also performant, testable, thread safe, easy to migrate, and should never corrupt your data"
+description = "The simplest to use API I could think of to persist a prefs to disk. Basically decorate a struct with a macro, then data is saved when you make write to it. It is also performant, testable, thread safe, easy to migrate, and careful to not corrupt your data"
 license = "MIT OR Apache-2.0"
 homepage = "https://everaccountable.com"
 repository = "https://github.com/everaccountable/easy_prefs"
