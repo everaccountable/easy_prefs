@@ -39,8 +39,8 @@ easy_prefs! {
 // Example of reading and writing:
 fn main() {
     // Load the preferences from disk. If the file doesn't exist, it will 
-    // just use default values
-    let mut prefs = AppPreferences::load();
+    // use default values. Note that the namespace is passed in as an argument.
+    let mut prefs = AppPreferences::load("com.mycompany.myapp");
     
     // Read a value
     println!("Notifications enabled: {}", prefs.get_notifications());

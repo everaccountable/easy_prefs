@@ -126,8 +126,8 @@ macro_rules! easy_prefs {
                 ///
                 /// If the file exists, it is deserialized; otherwise, the default values are used.
                 /// Panics if it fails to read or deserialize the file.
-                pub fn load() -> Self {
-                    let project = directories::ProjectDirs::from("rs", "everaccountable", "").unwrap_or_else(|| {
+                pub fn load(namespace: &str) -> Self {
+                    let project = directories::ProjectDirs::from(namespace, "", "").unwrap_or_else(|| {
                         panic!("Failed to get project directories");
                     });
                     let path = project.config_dir().join(Self::PREFERENCES_FILENAME);
@@ -417,14 +417,14 @@ mod tests {
     fn test_real_preferences() {
         // Delete any existing preferences file.
         let file_path = {
-            let preferences = TestEasyPreferences::load();
+            let preferences = TestEasyPreferences::load("com.example.app");
             preferences.get_preferences_file_path()
         };
         let _ = std::fs::remove_file(&file_path);
 
         // Test 1: Write and reload preferences.
         {
-            let mut preferences = TestEasyPreferences::load();
+            let mut preferences = TestEasyPreferences::load("com.example.app");
             preferences.save_bool1_default_true(false);
             {
                 let mut edit_guard = preferences.edit();
@@ -433,13 +433,13 @@ mod tests {
             }
         }
         {
-            let preferences = TestEasyPreferences::load();
+            let preferences = TestEasyPreferences::load("com.example.app");
             assert_eq!(preferences.get_bool1_default_true(), &false);
         }
 
         // Test 2: Simulate upgrading the preferences schema.
         {
-            let preferences = TestEasyPreferencesUpdated::load();
+            let preferences = TestEasyPreferencesUpdated::load("com.example.app");
             // The renamed field should preserve its value.
             assert_eq!(preferences.get_bool2_default_true_renamed(), &false);
             // The unchanged field should retain its saved value.
