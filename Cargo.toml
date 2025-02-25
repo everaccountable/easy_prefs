@@ -1,6 +1,6 @@
 [package]
 name = "easy_prefs"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 authors = ["Tyler Patterson <tyler@everaccountable.com>"]
 description = "The simplest to use API I could think of to persist a prefs to disk. Basically decorate a struct with a macro, then data is saved when you make write to it. It is also performant, testable, thread safe, easy to migrate, and careful to not corrupt your data"
