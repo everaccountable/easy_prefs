@@ -9,12 +9,15 @@
 //! The design priorities are:
 //!
 //! - **Ease of use:** Read and write operations are as simple as setting or getting a struct field.
-//! - **Safety:** Writes are performed using a temporary file so that crashes won’t leave your data corrupted.
+//! - **Safety:** Writes are performed using a temporary file so that crashes won't leave your data corrupted.
 //! - **Performance:** Reading and writing are optimized for speed.
 //! - **Easy Unit Testing:** The library is designed to play well with your unit tests.
 //!
 //! **Note:** This library is NOT intended to store large quantities of data. All data is cached in memory,
 //! and the entire file is rewritten on each save. Use a full database for heavy data storage.
+//!
+//! **Error Handling:** This library uses panics for simplicity. For production use, consider wrapping calls
+//! in error-handling logic if graceful failure is required.
 //!
 //! ## Example
 //!
@@ -33,21 +36,22 @@
 //! }
 //!
 //! fn main() {
-//!     let mut prefs = AppPreferences::load();
+//!     let mut prefs = AppPreferences::load("com.example.App");
 //!     println!("Notifications enabled: {}", prefs.get_notifications());
 //!     prefs.save_notifications(false);
 //! }
 //! ```
 
-pub use paste;  // Re-export paste so that users need not list it in their Cargo.toml.
-pub use toml;
-
+// Re-export dependencies so users don't need to add them to their Cargo.toml
+pub use paste;  // For macro pasting utilities
+pub use toml;   // For TOML serialization/deserialization
+pub use once_cell;  // For lazy static initialization
 
 /// Macro to define an easy-to-use preferences struct with automatic serialization and file persistence.
 ///
 /// # Overview
 /// This macro generates a struct that is serializable (via TOML) and provides methods to load,
-/// save, and edit preferences with a minimal API. It is designed to be thread safe and to protect
+/// save, and edit preferences with a minimal API. It is designed to be thread-safe and to protect
 /// against file corruption by writing data to a temporary file before renaming it into place.
 ///
 /// # Parameters
@@ -61,9 +65,12 @@ pub use toml;
 /// - **Performance:** Optimized for fast read and write operations.
 ///
 /// # Limitations
-/// This library is not intended for large datasets. Use an actual database if you need to handle a lot of data.
+/// - Not intended for large datasets. Use a database for heavy data storage.
+/// - Uses `namespace` as the qualifier in `ProjectDirs::from(namespace, "", "")`. For standard paths,
+///   provide a namespace like `"com.example.App"`.
 ///
 /// # Example
+///
 /// ```rust
 /// use easy_prefs::easy_prefs;
 ///
@@ -91,6 +98,19 @@ macro_rules! easy_prefs {
         $preferences_filename:expr
     ) => {
         $crate::paste::paste!{
+            // Static atomic flag to enforce single-instance constraint per struct type
+            static [<$name _INSTANCE_EXISTS>]: $crate::once_cell::sync::Lazy<std::sync::atomic::AtomicBool> =
+                $crate::once_cell::sync::Lazy::new(|| std::sync::atomic::AtomicBool::new(false));
+
+            // Guard struct to release the instance flag when dropped, with Debug for compatibility
+            $vis #[derive(Debug)] struct [<$name InstanceGuard>];
+
+            impl Drop for [<$name InstanceGuard>] {
+                fn drop(&mut self) {
+                    [<$name _INSTANCE_EXISTS>].store(false, std::sync::atomic::Ordering::Release);
+                }
+            }
+
             $(#[$outer])*
             #[derive(serde::Serialize, serde::Deserialize, Debug)]
             #[serde(default)]  // Apply default values to newly added fields
@@ -105,6 +125,9 @@ macro_rules! easy_prefs {
 
                 #[serde(skip_serializing, skip_deserializing)]
                 temp_file: Option<tempfile::NamedTempFile>,
+
+                #[serde(skip_serializing, skip_deserializing)]
+                _instance_guard: Option<[<$name InstanceGuard>]>,
             }
 
             impl Default for $name {
@@ -115,6 +138,7 @@ macro_rules! easy_prefs {
                         )*
                         full_path: None,
                         temp_file: None,
+                        _instance_guard: None,
                     }
                 }
             }
@@ -122,11 +146,20 @@ macro_rules! easy_prefs {
             impl $name {
                 const PREFERENCES_FILENAME: &'static str = concat!($preferences_filename, ".toml");
 
-                /// Loads the preferences from the configuration file.
-                ///
-                /// If the file exists, it is deserialized; otherwise, the default values are used.
-                /// Panics if it fails to read or deserialize the file.
+                /// Loads preferences from the configuration file.
+                /// Panics if another instance exists or if file operations fail.
                 pub fn load(namespace: &str) -> Self {
+                    let was_free = [<$name _INSTANCE_EXISTS>].compare_exchange(
+                        false, true,
+                        std::sync::atomic::Ordering::Acquire,
+                        std::sync::atomic::Ordering::Relaxed
+                    );
+
+                    if was_free.is_err() {
+                        panic!("Another instance of {} is already loaded.", stringify!($name));
+                    }
+
+                    let guard = [<$name InstanceGuard>];
                     let project = directories::ProjectDirs::from(namespace, "", "").unwrap_or_else(|| {
                         panic!("Failed to get project directories");
                     });
@@ -135,34 +168,38 @@ macro_rules! easy_prefs {
                     assert!(path.is_absolute(), "Path must be absolute: '{}'", path.display());
                     assert!(path.to_str().is_some(), "Path must be valid Unicode: '{:?}'", path);
 
-                    let mut cfg: Self = {
-                        if path.exists() {
-                            let mut file = std::fs::File::open(&path).unwrap_or_else(|e| {
-                                panic!("Failed to open preferences file: {}", e);
-                            });
-                            let mut contents = String::new();
-                            std::io::Read::read_to_string(&mut file, &mut contents).unwrap_or_else(|e| {
-                                panic!("Failed to read preferences file: {}", e);
-                            });
-                            let mut out = $crate::toml::from_str(&contents).unwrap_or_else(|e| {
-                                eprintln!("Failed to deserialize preferences, using default: {}", e);
-                                Self::default()
-                            });
-                            out.full_path = Some(path.to_path_buf());
-                            out
-                        } else {
-                            let mut default = Self::default();
-                            default.full_path = Some(path.to_path_buf());
-                            default
+                    let mut cfg: Self = if path.exists() {
+                        match std::fs::File::open(&path) {
+                            Ok(mut file) => {
+                                let mut contents = String::new();
+                                std::io::Read::read_to_string(&mut file, &mut contents)
+                                    .unwrap_or_else(|e| panic!("Failed to read preferences file: {}", e));
+                                match $crate::toml::from_str::<Self>(&contents) {
+                                    Ok(mut out) => {
+                                        out.full_path = Some(path.to_path_buf());
+                                        out
+                                    },
+                                    Err(e) => {
+                                        eprintln!("Failed to deserialize preferences, using default: {}", e);
+                                        let mut default = Self::default();
+                                        default.full_path = Some(path.to_path_buf());
+                                        default
+                                    }
+                                }
+                            },
+                            Err(e) => panic!("Failed to open preferences file: {}", e),
                         }
+                    } else {
+                        let mut default = Self::default();
+                        default.full_path = Some(path.to_path_buf());
+                        default
                     };
                     debug_assert!(cfg.full_path.is_some(), "full_path must be set");
+                    cfg._instance_guard = Some(guard);
                     cfg
                 }
 
-                /// Loads preferences using a temporary file for testing purposes.
-                ///
-                /// This method creates a temporary file with the default preferences.
+                /// Loads preferences using a temporary file for testing, bypassing the instance flag.
                 pub fn load_testing() -> Self {
                     let tmp_file = tempfile::NamedTempFile::with_prefix(Self::PREFERENCES_FILENAME)
                         .expect("Unable to create temporary file");
@@ -184,29 +221,26 @@ macro_rules! easy_prefs {
 
                 /// Returns a TOML-formatted string representation of the preferences.
                 pub fn to_string(&self) -> String {
-                    $crate::toml::to_string(self).expect("Unable to convert to toml")
+                    $crate::toml::to_string(self).expect("Unable to convert to TOML")
                 }
 
-                /// Saves the current preferences to the file.
-                ///
-                /// This method writes to a temporary file first and then renames it to ensure the data
-                /// is never left in a corrupt state.
+                /// Saves preferences to the file using a temporary file for safety.
                 pub fn save(&self) {
                     debug_assert!(self.full_path.is_some(), "full_path must be set. Use ::load() to create preferences.");
-                    debug_assert!(self.full_path.as_ref().unwrap().is_absolute(), "Path must be absolute: '{}'", self.full_path.as_ref().unwrap().display());
-                    let parent_dir = self.full_path.as_ref().unwrap().parent().unwrap();
+                    let full_path = self.full_path.as_ref().unwrap();
+                    debug_assert!(full_path.is_absolute(), "Path must be absolute: '{}'", full_path.display());
+                    let parent_dir = full_path.parent().unwrap();
                     std::fs::create_dir_all(&parent_dir).unwrap();
 
                     let tmp_file = tempfile::NamedTempFile::new_in(parent_dir)
-                        .unwrap_or_else(|e| panic!("Unable to create temporary file in '{}': {}", parent_dir.display(), e));
-
-                    let mut file = std::fs::File::create(&tmp_file.path())
+                        .unwrap_or_else(|e| panic!("Unable to create temp file in '{}': {}", parent_dir.display(), e));
+                    let mut file = std::fs::File::create(tmp_file.path())
                         .expect("Unable to create temporary file");
                     std::io::Write::write_all(
                         &mut file,
-                        $crate::toml::to_string(self).expect("Unable to convert to toml").as_bytes()
+                        $crate::toml::to_string(self).expect("Unable to convert to TOML").as_bytes()
                     ).expect("Unable to write to temporary file");
-                    std::fs::rename(tmp_file.path(), &self.full_path.as_ref().unwrap())
+                    std::fs::rename(tmp_file.path(), full_path)
                         .expect("Unable to rename temporary file");
                 }
 
@@ -217,14 +251,12 @@ macro_rules! easy_prefs {
                 }
 
                 $(
-                    /// Returns a reference to the value of the field.
+                    /// Returns a reference to the field value.
                     pub fn [<get_ $field>](&self) -> &$type {
                         &self.[<_ $field>]
                     }
 
-                    /// Updates the field value and immediately saves the preferences file.
-                    ///
-                    /// If the new value is the same as the current one, no write is performed.
+                    /// Updates the field value and saves immediately.
                     pub fn [<save_ $field>](&mut self, value: $type) {
                         if self.[<_ $field>] != value {
                             self.[<_ $field>] = value;
@@ -233,18 +265,7 @@ macro_rules! easy_prefs {
                     }
                 )*
 
-                /// Returns an edit guard that allows multiple fields to be updated at once.
-                ///
-                /// All changes made through the edit guard are saved when it goes out of scope.
-                ///
-                /// # Example
-                /// ```rust
-                /// {
-                ///     let mut edit_guard = prefs.edit();
-                ///     edit_guard.set_bool_field(false);
-                ///     edit_guard.set_string_field("new value".to_string());
-                /// } // Preferences are saved here.
-                /// ```
+                /// Returns an edit guard for batching multiple updates, saved on drop.
                 pub fn edit(&mut self) -> [<EditGuard_ $name>] {
                     [<EditGuard_ $name>] {
                         preferences: self,
@@ -254,9 +275,7 @@ macro_rules! easy_prefs {
                 }
             }
 
-            /// A guard that batches multiple changes to the preferences.
-            ///
-            /// When this guard is dropped, if any modifications were made, the preferences are saved.
+            /// Guard struct for batching changes, saves on drop if modified.
             pub struct [<EditGuard_ $name>]<'a> {
                 preferences: &'a mut $name,
                 modified: bool,
@@ -265,9 +284,7 @@ macro_rules! easy_prefs {
 
             impl<'a> [<EditGuard_ $name>]<'a> {
                 $(
-                    /// Sets the field value without immediately saving.
-                    ///
-                    /// The updated value will be persisted when the guard is dropped.
+                    /// Sets a field value without immediate save, marks as modified if changed.
                     pub fn [<set_ $field>](&mut self, value: $type) {
                         if self.preferences.[<_ $field>] != value {
                             self.preferences.[<_ $field>] = value;
@@ -275,7 +292,7 @@ macro_rules! easy_prefs {
                         }
                     }
 
-                    /// Returns a reference to the current value of the field.
+                    /// Returns a reference to the current field value.
                     pub fn [<get_ $field>](&self) -> &$type {
                         &self.preferences.[<_ $field>]
                     }
@@ -284,14 +301,12 @@ macro_rules! easy_prefs {
 
             impl<'a> Drop for [<EditGuard_ $name>]<'a> {
                 fn drop(&mut self) {
-                    // In debug builds, assert that the guard is not held for too long.
-                    // If the system is panicking, skip the check.
                     if cfg!(debug_assertions) && !std::thread::panicking() {
                         let duration = self.created.elapsed();
-                        assert!(duration.as_millis() < 10, "Edit guard was held for too long ({:?}). Keep operations fast to avoid blocking other threads.", duration);
-                        if self.modified {
-                            self.preferences.save();
-                        }
+                        assert!(duration.as_millis() < 10, "Edit guard held too long ({:?}).", duration);
+                    }
+                    if self.modified {
+                        self.preferences.save();
                     }
                 }
             }
@@ -299,90 +314,95 @@ macro_rules! easy_prefs {
     }
 }
 
-
-/// The following test structs simulate usage of the preferences API in debug builds.
+// Test structs for verifying the preferences API in debug builds
 #[cfg(debug_assertions)]
 easy_prefs! {
-    /// Test preferences for verifying the API functionality.
-    struct TestEasyPreferences {
+    /// Test preferences for verifying API functionality and real file operations.
+    struct TestEasyPreferencesReal {
         /// A boolean field defaulting to true.
         pub bool1_default_true: bool = true => "bool1_default_true",
         /// Another boolean field defaulting to true.
         pub bool2_default_true: bool = true => "bool2_default_true",
         /// A boolean field initially false.
         pub bool3_initial_default_false: bool = false => "bool3_initial_default_false",
-
         /// A string field with an empty default.
         pub string1: String = String::new() => "string1",
-
         /// An integer field with a default value.
         pub int1: i32 = 42 => "int1",
-    }, "test-easy-preferences-file"
+    }, "test-easy-preferences-file-real"
 }
 
-/// Simulates an upgraded preferences schema where a field is removed, renamed, or its default changed.
 #[cfg(debug_assertions)]
 easy_prefs! {
-    /// Updated test preferences simulating an app upgrade.
-    struct TestEasyPreferencesUpdated {
-        // pub bool1_default_true: bool = true,  // This field was removed.
-        /// This field was renamed from `bool2_default_true`.
+    /// Updated test preferences simulating an app upgrade, sharing the same file as TestEasyPreferencesReal.
+    struct TestEasyPreferencesUpdatedReal {
+        /// Renamed from `bool2_default_true`.
         pub bool2_default_true_renamed: bool = true => "bool2_default_true",
-        /// The default for this field has changed.
+        /// Default changed to true.
         pub bool3_initial_default_false: bool = true => "bool3_initial_default_false",
-        /// A new boolean field added with a default of true.
+        /// New boolean field.
         pub bool4_default_true: bool = true => "bool4_default_true",
-
-        /// The default value for this field was updated.
+        /// Default updated.
         pub string1: String = "ea".to_string() => "string1",
-        /// A new string field with its default value.
+        /// New string field.
         pub string2: String = "new default value".to_string() => "string2",
-    }, "test-easy-preferences-file"  // Same filename as the previous one.
+    }, "test-easy-preferences-file-real"
 }
 
+#[cfg(debug_assertions)]
+easy_prefs! {
+    /// Test preferences for verifying single-instance constraint behavior.
+    struct TestEasyPreferencesSingle {
+        pub bool1_default_true: bool = true => "bool1_default_true",
+        pub bool2_default_true: bool = true => "bool2_default_true",
+        pub bool3_initial_default_false: bool = false => "bool3_initial_default_false",
+        pub string1: String = String::new() => "string1",
+        pub int1: i32 = 42 => "int1",
+    }, "test-easy-preferences-file-single"
+}
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
     use super::*;
+    use std::sync::{Arc, Mutex, Barrier};
+    use std::thread;
+    use std::time::Duration;
+    use std::io::Read;
 
     /// Tests loading and saving preferences via the macro-generated API.
+    /// Uses `load_testing()` to avoid file-based conflicts with other tests.
     #[test]
     fn test_load_save_preferences_with_macro() {
-        let mut preferences = TestEasyPreferences::load_testing();
-
-        // Verify default values.
+        let mut preferences = TestEasyPreferencesReal::load_testing();
         assert_eq!(preferences.get_bool1_default_true(), &true);
         assert_eq!(preferences.get_bool2_default_true(), &true);
         assert_eq!(preferences.get_bool3_initial_default_false(), &false);
         assert_eq!(preferences.get_string1(), &"");
         assert_eq!(preferences.get_int1(), &42);
 
-        // Change values and save them.
         preferences.save_bool1_default_true(false);
         preferences.save_bool2_default_true(false);
         preferences.save_bool3_initial_default_false(true);
         preferences.save_string1("hi".to_string());
 
-        // Check that the in-memory values were updated.
         assert_eq!(preferences.get_bool1_default_true(), &false);
         assert_eq!(preferences.get_bool2_default_true(), &false);
         assert_eq!(preferences.get_bool3_initial_default_false(), &true);
         assert_eq!(preferences.get_string1(), &"hi");
 
-        // Read the file contents to ensure data was persisted.
         let mut file = std::fs::File::open(preferences.get_preferences_file_path())
             .expect("Unable to open preferences file");
         let mut contents = String::new();
-        std::io::Read::read_to_string(&mut file, &mut contents)
+        file.read_to_string(&mut contents)
             .expect("Unable to read preferences file");
         assert!(contents.contains("bool1_default_true"));
     }
 
     /// Verifies that the edit guard batches changes and persists them on drop.
+    /// Uses `load_testing()` for in-memory testing, avoiding file system interference.
     #[test]
     fn test_edit_guard() {
-        let mut preferences = TestEasyPreferences::load_testing();
+        let mut preferences = TestEasyPreferencesReal::load_testing();
         {
             let mut edit_guard = preferences.edit();
             edit_guard.set_bool1_default_true(false);
@@ -396,10 +416,11 @@ mod tests {
         assert_eq!(preferences.get_string1(), &"hi");
     }
 
-    /// Tests the usage of the preferences API in a multithreaded context.
+    /// Tests the preferences API in a multithreaded context using Arc and Mutex.
+    /// Uses `load_testing()` to ensure no file contention occurs.
     #[test]
     fn test_with_arc_mutex() {
-        let preferences = Arc::new(Mutex::new(TestEasyPreferences::load_testing()));
+        let preferences = Arc::new(Mutex::new(TestEasyPreferencesReal::load_testing()));
         {
             let prefs = preferences.lock().unwrap();
             assert_eq!(prefs.get_int1(), &42i32);
@@ -412,19 +433,24 @@ mod tests {
         }
     }
 
-    /// Tests persistence across loads and simulates an upgrade of the preferences schema.
+    /// Combined test for real file operations and single-instance constraint.
+    /// **Why Combined:** These tests both use `load()`, which relies on a static atomic flag to enforce a single instance.
+    /// Running them separately in parallel could cause conflicts due to shared static state, leading to hangs or failures.
+    /// By combining them into a single test and running sequentially, we ensure each section completes fully before the next begins,
+    /// avoiding interference while still verifying all intended behavior.
     #[test]
-    fn test_real_preferences() {
-        // Delete any existing preferences file.
+    fn test_real_preferences_and_single_instance() {
+        // --- Section 1: Test persistence across loads and schema upgrades ---
+        // Clean up any existing file to start fresh
         let file_path = {
-            let preferences = TestEasyPreferences::load("com.example.app");
+            let preferences = TestEasyPreferencesReal::load("com.example.app.real");
             preferences.get_preferences_file_path()
         };
         let _ = std::fs::remove_file(&file_path);
 
-        // Test 1: Write and reload preferences.
+        // Write initial preferences
         {
-            let mut preferences = TestEasyPreferences::load("com.example.app");
+            let mut preferences = TestEasyPreferencesReal::load("com.example.app.real");
             preferences.save_bool1_default_true(false);
             {
                 let mut edit_guard = preferences.edit();
@@ -432,23 +458,49 @@ mod tests {
                 edit_guard.set_string1("test1".to_string());
             }
         }
+
+        // Verify persistence with the same struct
         {
-            let preferences = TestEasyPreferences::load("com.example.app");
+            let preferences = TestEasyPreferencesReal::load("com.example.app.real");
             assert_eq!(preferences.get_bool1_default_true(), &false);
         }
 
-        // Test 2: Simulate upgrading the preferences schema.
+        // Verify schema upgrade with updated struct
         {
-            let preferences = TestEasyPreferencesUpdated::load("com.example.app");
-            // The renamed field should preserve its value.
+            let preferences = TestEasyPreferencesUpdatedReal::load("com.example.app.real");
             assert_eq!(preferences.get_bool2_default_true_renamed(), &false);
-            // The unchanged field should retain its saved value.
             assert_eq!(preferences.get_bool3_initial_default_false(), &false);
-            // New field uses its default.
             assert_eq!(preferences.get_bool4_default_true(), &true);
-            // String fields should reflect previously saved values or new defaults.
             assert_eq!(preferences.get_string1(), "test1");
             assert_eq!(preferences.get_string2(), "new default value");
         }
+
+        // --- Section 2: Test single-instance constraint ---
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_clone = barrier.clone();
+        let handle = thread::spawn(move || {
+            let preferences = TestEasyPreferencesSingle::load("com.example.app.single");
+            barrier_clone.wait(); // Wait until the main thread is ready
+            thread::sleep(Duration::from_millis(100));
+            drop(preferences);
+            true
+        });
+
+        barrier.wait(); // Ensure the spawned thread has loaded the instance
+        let second_result = std::panic::catch_unwind(|| {
+            let _second_instance = TestEasyPreferencesSingle::load("com.example.app.single");
+        });
+        assert!(second_result.is_err(), "Expected panic when loading a second instance");
+
+        assert_eq!(handle.join().unwrap(), true, "Thread should complete successfully");
+        let _new_instance = TestEasyPreferencesSingle::load("com.example.app.single");
+
+        // Verify that load_testing() allows multiple instances without interference
+        let test_instance1 = TestEasyPreferencesSingle::load_testing();
+        let test_instance2 = TestEasyPreferencesSingle::load_testing();
+        assert!(
+            test_instance1.get_preferences_file_path() != test_instance2.get_preferences_file_path(),
+            "load_testing() should generate unique file paths"
+        );
     }
 }
