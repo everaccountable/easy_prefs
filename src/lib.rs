@@ -95,7 +95,8 @@ macro_rules! easy_prefs {
                 $crate::once_cell::sync::Lazy::new(|| std::sync::atomic::AtomicBool::new(false));
 
             // Guard that resets the instance flag on drop.
-            $vis #[derive(Debug)] struct [<$name InstanceGuard>];
+            #[derive(Debug)]
+            struct [<$name InstanceGuard>];
             impl Drop for [<$name InstanceGuard>] {
                 fn drop(&mut self) {
                     [<$name _INSTANCE_EXISTS>].store(false, std::sync::atomic::Ordering::Release);
@@ -250,7 +251,7 @@ macro_rules! easy_prefs {
             }
 
             /// Guard for batch editing; saves changes on drop if any fields were modified.
-            pub struct [<EditGuard_ $name>]<'a> {
+            struct [<EditGuard_ $name>]<'a> {
                 preferences: &'a mut $name,
                 modified: bool,
                 created: std::time::Instant,
@@ -290,7 +291,6 @@ macro_rules! easy_prefs {
     }
 }
 
-// Test structs for verification.
 #[cfg(debug_assertions)]
 easy_prefs! {
     /// Original test preferences.
@@ -306,7 +306,7 @@ easy_prefs! {
 #[cfg(debug_assertions)]
 easy_prefs! {
     /// Updated test preferences for schema evolution.
-    struct TestEasyPreferencesUpdated {
+    pub struct TestEasyPreferencesUpdated {
         pub bool2_default_true_renamed: bool = true => "bool2_default_true",
         pub bool3_initial_default_false: bool = true => "bool3_initial_default_false",
         pub bool4_default_true: bool = true => "bool4_default_true",
