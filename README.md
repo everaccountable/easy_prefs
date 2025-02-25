@@ -20,7 +20,7 @@ easy_preferences does these things well:
 
 ## Example
 
-```rust
+
 use easy_prefs::easy_prefs;
 
 /////////////////////////////////////////////////////////////
@@ -40,14 +40,17 @@ easy_prefs! {
 fn main() {
     // Load the preferences from disk. If the file doesn't exist, it will 
     // use default values. Note that the namespace is passed in as an argument.
-    let mut prefs = AppPreferences::load("com.mycompany.myapp");
+    // load() returns a Result and can fail for various reasons.
+    let mut prefs = AppPreferences::load("com.mycompany.myapp")
+        .expect("Failed to load preferences");
     
     // Read a value
     println!("Notifications enabled: {}", prefs.get_notifications());
     
     // Save a value. If the value has changed then this will rewrite the file to disk.
     // Note that this is a blocking operation.
-    prefs.save_notifications(false);
+    prefs.save_notifications(false)
+        .expect("Failed to save notification preference");
     
     // Save multiple values at the same time by creating an edit_guard. It gets saved
     // when the edit_guard goes out of scope:
@@ -61,7 +64,8 @@ fn main() {
 /////////////////////////////////////////////////////////////
 // An example unit test. Notice that we call load_testing()
 // so that the preferences file is temporary and gets cleaned 
-// up after the test.
+// up after the test. Unlike load(), load_testing() will panic
+// directly if there's an error.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,18 +74,70 @@ mod tests {
     fn test_prefs() {
         let mut prefs = AppPreferences::load_testing();
         assert_eq!(prefs.get_notifications(), true);
-        prefs.save_notifications(false);
-        assert_eq!(prefs.get_notifications(), false);
+        prefs.save_notifications(false)
+            .expect("Failed to save preference");
     }
 }
-```
+
 
 
 ### Limitations:
 - NOT intended to store large quantities of data. All data is cached in memory,
-  and the entire file is rewritten on each save. Use a full database for heavy data storage.
+and the entire file is rewritten on each save. Use a full database for heavy data storage.
 - Writes happen on whatever thread you use when you save the data. This is a blocking operation. In the future we may make it save from a background thread.
-- Currently we don't make any guarantee about which version will be written when multiple threads write at the same time.
+
+## Thread Safety
+
+The `easy_prefs` library enforces a single-instance constraint for each preferences struct:
+
+- **Single-Instance Constraint**: The `load()` method ensures that only one instance of a preferences struct can exist at any time using a static atomic flag.
+
+- **Multiple Threads**: It is an error to try to load the same preferences struct on multiple threads simultaneously. Attempting to do so will result in a `LoadError::InstanceAlreadyLoaded` error.
+
+- **Sharing Across Threads**: If you need to access preferences from multiple threads, wrap your preferences instance in an `Arc<Mutex<>>`:
+
+  
+use std::sync::{Arc, Mutex};
+  
+// Load preferences once
+let prefs = AppPreferences::load("com.mycompany.myapp")
+    .expect("Failed to load preferences");
+      
+// Share across threads using Arc<Mutex<>>
+let shared_prefs = Arc::new(Mutex::new(prefs));
+  
+// In thread 1
+let prefs_clone = Arc::clone(&shared_prefs);
+let handle = std::thread::spawn(move || {
+    let prefs = prefs_clone.lock().unwrap();
+    println!("Username: {}", prefs.get_username());
+});
+  
+// In main thread
+{
+    let mut prefs = shared_prefs.lock().unwrap();
+    prefs.save_notifications(false).expect("Failed to save");
+}
+  
+handle.join().unwrap();
+
+## Edit Guards
+
+The edit guards are designed for short-lived batch operations. In debug builds,
+holding an edit guard for more than 10ms will trigger an assertion failure. This
+helps identify places where you might be accidentally holding the guard for too long,
+which could block other operations.
+
+The single-instance constraint prevents potential data corruption that could occur
+if multiple instances were simultaneously reading from and writing to the same
+preferences file. This design choice simplifies the API while ensuring data integrity.
+
+## File Storage
+
+Preferences are stored in the platform-specific config directory as determined by the
+[directories](https://crates.io/crates/directories) crate, based on the namespace you
+provide. For example, on Linux this might be `~/.config/app-preferences.toml`, while
+on Windows it could be `C:\Users\Username\AppData\Roaming\app-preferences.toml`.
 
 
 ## Origin Story of easy_prefs, by Tyler Patterson
@@ -102,8 +158,28 @@ I went through about 4 different iterations of this library before I landed on t
 I settled on using a macro because I could define both the struct and and the default
 values all in one place. And because the read and save functions can be made so simple.
 
-ChatGPT and Grok helped a bunch - thanks!
+ChatGPT, Claude, and Grok helped a bunch - thanks!
 
-## Zero Guarantees
-We did our best to make this great and keep your data safe, but it comes with
-ZERO GUARANTEES! Use at your own risk... And if you find problems please help us fix them!
+## License
+
+MIT License
+
+Copyright (c) 2023 Ever Accountable
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
