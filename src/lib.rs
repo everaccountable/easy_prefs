@@ -72,7 +72,6 @@ impl std::fmt::Display for LoadError {
 }
 
 impl std::error::Error for LoadError {}
-
 /// Macro to define a preferences struct with file persistence.
 ///
 /// Generates a struct with methods for loading, saving, and editing preferences.
@@ -188,18 +187,18 @@ macro_rules! easy_prefs {
                 }
 
                 /// Loads preferences into a temporary file for testing (ignores the single-instance constraint).
-                pub fn load_testing() -> Result<Self, $crate::LoadError> {
+                pub fn load_testing() -> Self {
                     let tmp_file = tempfile::NamedTempFile::with_prefix(Self::PREFERENCES_FILENAME)
-                        .map_err($crate::LoadError::FileOpenError)?;
+                        .expect("Failed to create temporary file for testing preferences");
                     let path = tmp_file.path().to_path_buf();
                     let mut cfg = Self::default();
                     let mut file = std::fs::File::create(&path)
-                        .map_err($crate::LoadError::FileOpenError)?;
+                        .expect("Failed to create preferences file for testing");
                     std::io::Write::write_all(&mut file, $crate::toml::to_string(&cfg).unwrap().as_bytes())
-                        .map_err($crate::LoadError::FileReadError)?;
+                        .expect("Failed to write preferences data to temporary file");
                     cfg.full_path = Some(path);
                     cfg.temp_file = Some(tmp_file);
-                    Ok(cfg)
+                    cfg
                 }
 
                 /// Serializes preferences to a TOML string.
@@ -290,7 +289,6 @@ macro_rules! easy_prefs {
         }
     }
 }
-
 #[cfg(debug_assertions)]
 easy_prefs! {
     /// Original test preferences.
@@ -314,7 +312,6 @@ easy_prefs! {
         pub string2: String = "new default value".to_string() => "string2",
     }, "test-easy-prefs"
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,7 +322,7 @@ mod tests {
     /// Tests loading and saving using `load_testing()` (ignores the single-instance constraint).
     #[test]
     fn test_load_save_preferences_with_macro() {
-        let mut prefs = TestEasyPreferences::load_testing().expect("Failed to load test prefs");
+        let mut prefs = TestEasyPreferences::load_testing();
         assert_eq!(prefs.get_bool1_default_true(), &true);
         assert_eq!(prefs.get_int1(), &42);
 
@@ -341,7 +338,7 @@ mod tests {
     /// Tests the edit guard batching and save-on-drop functionality.
     #[test]
     fn test_edit_guard() {
-        let mut prefs = TestEasyPreferences::load_testing().expect("Failed to load test prefs");
+        let mut prefs = TestEasyPreferences::load_testing();
         {
             let mut guard = prefs.edit();
             guard.set_bool1_default_true(false);
@@ -359,7 +356,7 @@ mod tests {
     /// Tests multithreading with Arc/Mutex using `load_testing()`.
     #[test]
     fn test_with_arc_mutex() {
-        let prefs = Arc::new(Mutex::new(TestEasyPreferences::load_testing().expect("Failed to load")));
+        let prefs = Arc::new(Mutex::new(TestEasyPreferences::load_testing()));
         {
             let prefs = prefs.lock().unwrap();
             assert_eq!(prefs.get_int1(), &42);
@@ -428,7 +425,7 @@ mod tests {
         let _prefs = TestEasyPreferences::load("com.example.app").expect("Failed to load after drop");
 
         // Verify that `load_testing()` ignores the single-instance constraint.
-        let _test1 = TestEasyPreferences::load_testing().expect("Failed to load test1");
-        let _test2 = TestEasyPreferences::load_testing().expect("Failed to load test2");
+        let _test1 = TestEasyPreferences::load_testing();
+        let _test2 = TestEasyPreferences::load_testing();
     }
 }
