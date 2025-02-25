@@ -1,59 +1,67 @@
-A simple to use, safe, and lightweight way to save preferences (or really anything you would keep in a struct).
+Below is a cleaned-up version of the markdown file with improved formatting and consistent styling:
 
-We asked: "What is the simplest possible API to persist a struct in Rust?" This is our answer.
-(Oh, and it is also performant, testable, thread safe, easy to migrate, and should never corrupt your data)
+---
 
-*This library was created by Ever Accountable – an app that helps people quit compulsive porn use
-and become the best version of themselves. More info at [everaccountable.com](https://everaccountable.com).*
+# easy_preferences
 
-easy_preferences does these things well:
+A simple-to-use, safe, and lightweight way to save preferences (or really anything you would keep in a struct).
 
-- **Easy to use!** This is the overarching priority.
-- **Define it all in one place:** Define your preferences in a familiar struct format. Including the types and default values. Anything serializable is allowed.
-- **Lightweight API:** Read and write operations are as simple as setting or getting a field on a struct.
-- **Type safety:** The library will ensure that you are reading and writing the correct types.
-- **Data Safety:** Writes are performed carefully so that an inopportune system crash won’t leave your data corrupted (we write to a temporary file and then rename it)
-- **Migrate-able:** If you rename a field in the code, you can specify the old field name so that legacy data doesn't get lost.
-- **Lightweight performance:** We use .toml files under the hood. No big memory or cpu requirements. It just saves to disk when something has changed.
-- **Thread Safety:** Read and write from multiple threads without worry.
-- **Easy Unit Testing:** The library is designed to play well with your unit tests.
+We asked: *"What is the simplest possible API to persist a struct in Rust?"*  
+This is our answer. (It’s performant, testable, thread-safe, easy to migrate, and designed to never corrupt your data.)
+
+*This library was created by Ever Accountable – an app that helps people quit compulsive porn use and become the best version of themselves. More info at [everaccountable.com](https://everaccountable.com).*
+
+## Features
+
+- **Easy to use!**  
+  The overarching priority.
+- **Define it all in one place:**  
+  Define your preferences in a familiar struct format with types and default values. Anything serializable is allowed.
+- **Lightweight API:**  
+  Reading and writing are as simple as getting or setting a field on a struct.
+- **Type Safety:**  
+  Ensures that you are reading and writing the correct types.
+- **Data Safety:**  
+  Writes are performed carefully (using a temporary file then renaming) to avoid data corruption.
+- **Migratable:**  
+  Rename fields and specify old names so that legacy data isn’t lost.
+- **Lightweight Performance:**  
+  Uses TOML files under the hood and only writes to disk when something changes.
+- **Thread Safety:**  
+  Supports concurrent read and write from multiple threads.
+- **Easy Unit Testing:**  
+  Designed to play well with your tests.
 
 ## Example
 
-
+```rust
 use easy_prefs::easy_prefs;
 
-/////////////////////////////////////////////////////////////
-// Define your preferences in a struct. The default values are specified here.
+// Define your preferences in a struct with default values.
 easy_prefs! {
     pub struct AppPreferences {
-        /// A boolean preference. Note the default value is true, and the field name in the file is "notifications"
+        /// A boolean preference. Default is `true`, stored as "notifications".
         pub notifications: bool = true => "notifications",
-        /// Note here that we've specified the name of the field in the file.
+        /// A string preference with default "guest", stored as "username".
         pub username: String = "guest".to_string() => "username",
     },
-    "app-preferences"  // This is the filename. The directory comes from the directories crate.
+    "app-preferences"  // Filename (the directory is determined by the `directories` crate).
 }
 
-/////////////////////////////////////////////////////////////
-// Example of reading and writing:
+// Reading and writing example.
 fn main() {
-    // Load the preferences from disk. If the file doesn't exist, it will 
-    // use default values. Note that the namespace is passed in as an argument.
-    // load() returns a Result and can fail for various reasons.
+    // Load preferences from disk. Uses default values if the file doesn't exist.
     let mut prefs = AppPreferences::load("com.mycompany.myapp")
         .expect("Failed to load preferences");
     
-    // Read a value
+    // Read a value.
     println!("Notifications enabled: {}", prefs.get_notifications());
     
-    // Save a value. If the value has changed then this will rewrite the file to disk.
-    // Note that this is a blocking operation.
+    // Save a value (blocking operation).
     prefs.save_notifications(false)
         .expect("Failed to save notification preference");
     
-    // Save multiple values at the same time by creating an edit_guard. It gets saved
-    // when the edit_guard goes out of scope:
+    // Save multiple values using an edit guard.
     {
         let mut edit_guard = prefs.edit();
         edit_guard.set_notifications(true);
@@ -61,11 +69,7 @@ fn main() {
     }
 }
 
-/////////////////////////////////////////////////////////////
-// An example unit test. Notice that we call load_testing()
-// so that the preferences file is temporary and gets cleaned 
-// up after the test. Unlike load(), load_testing() will panic
-// directly if there's an error.
+// Example unit test.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,108 +82,87 @@ mod tests {
             .expect("Failed to save preference");
     }
 }
+```
 
+## Limitations
 
-
-### Limitations:
-- NOT intended to store large quantities of data. All data is cached in memory,
-and the entire file is rewritten on each save. Use a full database for heavy data storage.
-- Writes happen on whatever thread you use when you save the data. This is a blocking operation. In the future we may make it save from a background thread.
+- **Not for large data:**  
+  All data is cached in memory, and the entire file is rewritten on each save. Use a full database for heavy storage.
+- **Blocking Writes:**  
+  Writes occur on the calling thread. (Future versions may use background threads.)
 
 ## Thread Safety
 
-The `easy_prefs` library enforces a single-instance constraint for each preferences struct:
+The library enforces a single-instance constraint for each preferences struct:
 
-- **Single-Instance Constraint**: The `load()` method ensures that only one instance of a preferences struct can exist at any time using a static atomic flag.
+- **Single-Instance Constraint:**  
+  The `load()` method ensures only one instance exists at a time using a static atomic flag.
+- **Multiple Threads:**  
+  Loading the same preferences struct on multiple threads will result in a `LoadError::InstanceAlreadyLoaded`.
+- **Sharing Across Threads:**  
+  Wrap your instance in an `Arc<Mutex<>>` to share it:
 
-- **Multiple Threads**: It is an error to try to load the same preferences struct on multiple threads simultaneously. Attempting to do so will result in a `LoadError::InstanceAlreadyLoaded` error.
-
-- **Sharing Across Threads**: If you need to access preferences from multiple threads, wrap your preferences instance in an `Arc<Mutex<>>`:
-
-  
+```rust
 use std::sync::{Arc, Mutex};
-  
-// Load preferences once
+
+// Load preferences once.
 let prefs = AppPreferences::load("com.mycompany.myapp")
     .expect("Failed to load preferences");
-      
-// Share across threads using Arc<Mutex<>>
+
+// Share across threads.
 let shared_prefs = Arc::new(Mutex::new(prefs));
-  
-// In thread 1
+
+// In thread 1.
 let prefs_clone = Arc::clone(&shared_prefs);
 let handle = std::thread::spawn(move || {
     let prefs = prefs_clone.lock().unwrap();
     println!("Username: {}", prefs.get_username());
 });
-  
-// In main thread
+
+// In main thread.
 {
     let mut prefs = shared_prefs.lock().unwrap();
-    prefs.save_notifications(false).expect("Failed to save");
+    prefs.save_notifications(false)
+         .expect("Failed to save");
 }
-  
+
 handle.join().unwrap();
+```
 
 ## Edit Guards
 
-The edit guards are designed for short-lived batch operations. In debug builds,
-holding an edit guard for more than 10ms will trigger an assertion failure. This
-helps identify places where you might be accidentally holding the guard for too long,
-which could block other operations.
-
-The single-instance constraint prevents potential data corruption that could occur
-if multiple instances were simultaneously reading from and writing to the same
-preferences file. This design choice simplifies the API while ensuring data integrity.
+Edit guards are designed for short-lived batch operations. In debug builds, holding an edit guard for more than 10ms triggers an assertion failure. This helps prevent accidental blocking and potential data corruption from concurrent writes.
 
 ## File Storage
 
-Preferences are stored in the platform-specific config directory as determined by the
-[directories](https://crates.io/crates/directories) crate, based on the namespace you
-provide. For example, on Linux this might be `~/.config/app-preferences.toml`, while
-on Windows it could be `C:\Users\Username\AppData\Roaming\app-preferences.toml`.
+Preferences are stored in the platform-specific configuration directory (determined by the [directories](https://crates.io/crates/directories) crate) based on the provided namespace. For example:
+- **Linux:** `~/.config/app-preferences.toml`
+- **Windows:** `C:\Users\Username\AppData\Roaming\app-preferences.toml`
 
+## Origin Story
 
-## Origin Story of easy_prefs, by Tyler Patterson
-Common things should be simple! Writing and reading user preferences is a common task
-that I have found to be surprisingly cumbersome both in Rust and in Android.
+*By Tyler Patterson*
 
-sqlite and sled seem like great databases, but using them for simple preferences seems like
-overkill and has a lot of boilerplate. I've tried other preferences libraries and I never
-liked how cumbersome things felt.
+Common things should be simple! Writing and reading user preferences is a common task that has been surprisingly cumbersome in both Rust and Android.
 
-Reading and writing preferences should be as
-close as possible to just setting and getting fields on a struct. That's it!
-Define a struct, along with default values right there, set a name for the file,
-and names for the fields in the file (for future-proofing).
+While databases like sqlite and sled are powerful, they add unnecessary boilerplate for simple preferences. After trying several libraries, I wanted an API that felt as natural as setting and getting fields on a struct.
 
-I went through about 4 different iterations of this library before I landed on this one.
-
-I settled on using a macro because I could define both the struct and and the default
-values all in one place. And because the read and save functions can be made so simple.
-
-ChatGPT, Claude, and Grok helped a bunch - thanks!
+I went through about four iterations before settling on a macro-based approach that defines both the struct and default values in one place. Special thanks to ChatGPT, Claude, and Grok for their help!
 
 ## License
 
 MIT License
 
+```
 Copyright (c) 2023 Ever Accountable
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+---
+
+This version uses consistent heading levels, clear code blocks with Rust syntax highlighting, and improved spacing for readability.
