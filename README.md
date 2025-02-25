@@ -71,7 +71,6 @@ fn main() {
   - **FileOpenError / FileReadError:** Problems during file I/O.
   - **DeserializationError:** Errors while parsing TOML data.
 
-  *Note:* If TOML deserialization fails, a log message is printed and the library silently falls back to default values.
 
 ### Use Across Threads
 

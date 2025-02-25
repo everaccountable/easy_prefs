@@ -168,15 +168,12 @@ macro_rules! easy_prefs {
                         let mut contents = String::new();
                         std::io::Read::read_to_string(&mut file, &mut contents)
                             .map_err($crate::LoadError::FileReadError)?;
-                        match $crate::toml::from_str::<Self>(&contents) {
-                            Ok(mut out) => { out.full_path = Some(path); out },
-                            Err(e) => {
-                                eprintln!("Deserialization failed, using defaults: {}", e);
-                                let mut default = Self::default();
-                                default.full_path = Some(path);
-                                default
+                            match $crate::toml::from_str::<Self>(&contents) {
+                                Ok(mut out) => { out.full_path = Some(path); out },
+                                Err(e) => {
+                                    return Err($crate::LoadError::DeserializationError(e));
+                                }
                             }
-                        }
                     } else {
                         let mut default = Self::default();
                         default.full_path = Some(path);
