@@ -150,6 +150,19 @@ macro_rules! easy_prefs {
                 /// - File operations fail.
                 /// - TOML deserialization fails.
                 pub fn load(namespace: &str) -> Result<Self, $crate::LoadError> {
+
+                    {
+                        // Runtime duplicate check for field_names. We don't want duplicates!
+                        use std::collections::HashSet;
+                        let keys = [ $( ($saved_name, stringify!($field) ), )* ];
+                        let mut seen = HashSet::new();
+                        for (key, field_name) in keys.iter() {
+                            if !seen.insert(*key) {
+                                panic!("Duplicate saved_name '{}' found for field '{}'", key, field_name);
+                            }
+                        }
+                    }
+
                     let was_free = [<$name _INSTANCE_EXISTS>].compare_exchange(
                         false, true, std::sync::atomic::Ordering::Acquire, std::sync::atomic::Ordering::Relaxed
                     );
