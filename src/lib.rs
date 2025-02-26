@@ -56,7 +56,7 @@ pub enum LoadError {
     /// Failed to read/write the file.
     FileReadError(std::io::Error),
     /// Failed to deserialize TOML data.
-    DeserializationError(toml::de::Error),
+    DeserializationError(std::path::PathBuf, toml::de::Error),
 }
 
 impl std::fmt::Display for LoadError {
@@ -66,7 +66,7 @@ impl std::fmt::Display for LoadError {
             Self::ProjectDirsError(msg) => write!(f, "project directories error: {}", msg),
             Self::FileOpenError(e) => write!(f, "file open error: {}", e),
             Self::FileReadError(e) => write!(f, "file read/write error: {}", e),
-            Self::DeserializationError(e) => write!(f, "deserialization error: {}", e),
+            Self::DeserializationError(path, e) => write!(f, "error: {}, file: {:?}", e, path),
         }
     }
 }
@@ -171,7 +171,7 @@ macro_rules! easy_prefs {
                             match $crate::toml::from_str::<Self>(&contents) {
                                 Ok(mut out) => { out.full_path = Some(path); out },
                                 Err(e) => {
-                                    return Err($crate::LoadError::DeserializationError(e));
+                                    return Err($crate::LoadError::DeserializationError(path.clone(), e));
                                 }
                             }
                     } else {
