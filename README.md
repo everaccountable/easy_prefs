@@ -43,7 +43,7 @@ easy_prefs! {
 ```rust
 fn main() {
     // Load preferences; defaults are used if the file doesn't exist.
-    let mut prefs = AppPreferences::load("com.mycompany.myapp")
+    let mut prefs = AppPreferences::load("./com.mycompany.myapp")
         .expect("Failed to load preferences");
 
     println!("Notifications: {}", prefs.get_notifications());

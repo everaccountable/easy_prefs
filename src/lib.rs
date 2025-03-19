@@ -140,7 +140,7 @@ macro_rules! easy_prefs {
                 ///
                 /// # Arguments
                 ///
-                /// * `namespace` - For example, "com.example.App" to determine the config directory.
+                /// * `path` - The full path to the preferences file.
                 ///
                 /// # Errors
                 ///
@@ -149,7 +149,7 @@ macro_rules! easy_prefs {
                 /// - The project directory cannot be determined.
                 /// - File operations fail.
                 /// - TOML deserialization fails.
-                pub fn load(namespace: &str) -> Result<Self, $crate::LoadError> {
+                pub fn load(directory: &str) -> Result<Self, $crate::LoadError> {
 
                     {
                         // Runtime duplicate check for field_names. We don't want duplicates!
@@ -171,9 +171,7 @@ macro_rules! easy_prefs {
                     }
 
                     let guard = [<$name InstanceGuard>];
-                    let project = directories::ProjectDirs::from(namespace, "", "")
-                        .ok_or_else(|| $crate::LoadError::ProjectDirsError("invalid namespace".to_string()))?;
-                    let path = project.config_dir().join(Self::PREFERENCES_FILENAME);
+                    let path = std::path::PathBuf::from(directory).join(Self::PREFERENCES_FILENAME);
 
                     let mut cfg = if path.exists() {
                         let mut file = std::fs::File::open(&path)
@@ -388,26 +386,26 @@ mod tests {
     fn test_real_preferences_and_single_instance() {
         // --- Part 1: Test persistence and schema upgrades ---
         let path = {
-            let prefs = TestEasyPreferences::load("com.example.app").expect("Failed to load");
+            let prefs = TestEasyPreferences::load("/tmp/tests/").expect("Failed to load");
             prefs.get_preferences_file_path()
         };
         let _ = std::fs::remove_file(&path); // Clean up any previous run
 
         // Save some values.
         {
-            let mut prefs = TestEasyPreferences::load("com.example.app").expect("Failed to load");
+            let mut prefs = TestEasyPreferences::load("/tmp/tests/").expect("Failed to load");
             prefs.save_bool1_default_true(false).expect("Failed to save bool1");
             prefs.edit().set_string1("test1".to_string());
         }
         // Verify persistence.
         {
-            let prefs = TestEasyPreferences::load("com.example.app").expect("Failed to load");
+            let prefs = TestEasyPreferences::load("/tmp/tests/").expect("Failed to load");
             assert_eq!(prefs.get_bool1_default_true(), &false);
             assert_eq!(prefs.get_string1(), "test1");
         }
         // Test schema evolution.
         {
-            let prefs = TestEasyPreferencesUpdated::load("com.example.app").expect("Failed to load updated");
+            let prefs = TestEasyPreferencesUpdated::load("/tmp/tests/").expect("Failed to load updated");
             assert_eq!(prefs.get_bool2_default_true_renamed(), &true); // Default (not saved earlier)
             assert_eq!(prefs.get_string1(), "test1");
             assert_eq!(prefs.get_string2(), "new default value");
@@ -418,7 +416,7 @@ mod tests {
         let barrier_clone = barrier.clone();
 
         let handle = thread::spawn(move || {
-            let prefs = TestEasyPreferences::load("com.example.app").expect("Failed to load");
+            let prefs = TestEasyPreferences::load("/tmp/tests/").expect("Failed to load");
             barrier_clone.wait(); // Hold instance until main thread tries to load.
             thread::sleep(Duration::from_millis(100));
             drop(prefs); // Release instance.
