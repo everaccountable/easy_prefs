@@ -214,14 +214,60 @@ macro_rules! easy_prefs {
                     $crate::toml::to_string(self).expect("Serialization failed")
                 }
 
-                /// Saves preferences to file using a temporary file for atomicity.
+                /// Save the preferences data to the specified file path.
+                ///
+                /// This function serializes the preferences data to TOML format, writes it to a temporary file,
+                /// and then persists that file to the final path. It ensures that parent directories exist
+                /// and provides detailed error messages if any step fails.
+                ///
+                /// # Returns
+                /// - `Ok(())` if the save operation succeeds.
+                /// - `Err(std::io::Error)` if any step (e.g., directory creation, file writing, or persisting) fails.
+                ///
+                /// # Errors
+                /// - Returns an error if the `full_path` is not set.
+                /// - Returns an error if the parent directory cannot be determined or created.
+                /// - Returns an error if serialization fails.
+                /// - Returns an error if writing to the temporary file or persisting it fails.
                 pub fn save(&self) -> Result<(), std::io::Error> {
-                    let path = self.full_path.as_ref().expect("full_path must be set");
-                    let parent_dir = path.parent().unwrap();
+                    // Ensure the full_path is set
+                    let path = self.full_path.as_ref().ok_or_else(|| std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "path not set"
+                    ))?;
+
+                    // Get the parent directory and ensure it exists
+                    let parent_dir = path.parent().ok_or_else(|| std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("no parent directory for '{}'", path.display())
+                    ))?;
                     std::fs::create_dir_all(parent_dir)?;
-                    let tmp_file = tempfile::NamedTempFile::new_in(parent_dir)?;
-                    std::io::Write::write_all(&mut std::fs::File::create(tmp_file.path())?, self.to_string().as_bytes())?;
-                    std::fs::rename(tmp_file.path(), path)?;
+
+                    // Create a temporary file in the parent directory
+                    let mut tmp_file = tempfile::NamedTempFile::new_in(parent_dir)?;
+
+                    // Serialize the preferences data to TOML
+                    let serialized = $crate::toml::to_string(self).map_err(|e| std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("serialization failed: {}", e)
+                    ))?;
+
+                    // Write the serialized data to the temporary file
+                    std::io::Write::write_all(&mut tmp_file, serialized.as_bytes())?;
+
+                    // Persist the temporary file to the final path
+                    tmp_file.persist(path).map_err(|persist_err| {
+                        std::io::Error::new(
+                            persist_err.error.kind(),
+                            format!(
+                                "failed to save '{}' (testing: {}): {}",
+                                path.display(),
+                                self.temp_file.is_some(),
+                                persist_err.error
+                            )
+                        )
+                    })?;
+
                     Ok(())
                 }
 

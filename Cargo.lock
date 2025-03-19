@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "easy_prefs"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "directories",
  "once_cell",
