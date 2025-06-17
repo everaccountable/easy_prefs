@@ -28,11 +28,10 @@
 //! Errors include existing instances, directory issues, or file operation failures. See
 //! [`load()`](#method.load) for details.
 
-
 // Re-export dependencies for convenience
-pub use paste;       // Macro utilities
-pub use toml;        // TOML serialization
-pub use once_cell;   // Lazy statics
+pub use once_cell;
+pub use paste; // Macro utilities
+pub use toml; // TOML serialization // Lazy statics
 
 // IMPORTANT: Don't use these because the macro won't be able to see them.
 // Instead, use fully qualified names wherever needed.
@@ -62,7 +61,9 @@ pub enum LoadError {
 impl std::fmt::Display for LoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InstanceAlreadyLoaded => write!(f, "another preferences instance is already loaded"),
+            Self::InstanceAlreadyLoaded => {
+                write!(f, "another preferences instance is already loaded")
+            }
             Self::ProjectDirsError(msg) => write!(f, "project directories error: {}", msg),
             Self::FileOpenError(e) => write!(f, "file open error: {}", e),
             Self::FileReadError(e) => write!(f, "file read/write error: {}", e),
@@ -132,6 +133,17 @@ macro_rules! easy_prefs {
 
             impl $name {
                 const PREFERENCES_FILENAME: &'static str = concat!($preferences_filename, ".toml");
+
+                pub fn load_default(directory: &str) -> Self {
+                    let guard = [<$name InstanceGuard>];
+                    let path = std::path::PathBuf::from(directory).join(Self::PREFERENCES_FILENAME);
+
+                    // Ensure the path is set, even if it doesn't exist yet.
+                    let mut default = Self::default();
+                    default.full_path = Some(path);
+                    default._instance_guard = Some(guard);
+                    default
+                }
 
                 /// Loads preferences from a file, enforcing the single-instance constraint.
                 ///
@@ -369,7 +381,7 @@ easy_prefs! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, Barrier};
+    use std::sync::{Arc, Barrier, Mutex};
     use std::thread;
     use std::time::Duration;
 
@@ -380,8 +392,12 @@ mod tests {
         assert_eq!(prefs.get_bool1_default_true(), &true);
         assert_eq!(prefs.get_int1(), &42);
 
-        prefs.save_bool1_default_true(false).expect("Failed to save bool1");
-        prefs.save_string1("hi".to_string()).expect("Failed to save string1");
+        prefs
+            .save_bool1_default_true(false)
+            .expect("Failed to save bool1");
+        prefs
+            .save_string1("hi".to_string())
+            .expect("Failed to save string1");
 
         let contents = std::fs::read_to_string(prefs.get_preferences_file_path())
             .expect("Failed to read file");
@@ -440,7 +456,9 @@ mod tests {
         // Save some values.
         {
             let mut prefs = TestEasyPreferences::load("/tmp/tests/").expect("Failed to load");
-            prefs.save_bool1_default_true(false).expect("Failed to save bool1");
+            prefs
+                .save_bool1_default_true(false)
+                .expect("Failed to save bool1");
             prefs.edit().set_string1("test1".to_string());
         }
         // Verify persistence.
@@ -451,7 +469,8 @@ mod tests {
         }
         // Test schema evolution.
         {
-            let prefs = TestEasyPreferencesUpdated::load("/tmp/tests/").expect("Failed to load updated");
+            let prefs =
+                TestEasyPreferencesUpdated::load("/tmp/tests/").expect("Failed to load updated");
             assert_eq!(prefs.get_bool2_default_true_renamed(), &true); // Default (not saved earlier)
             assert_eq!(prefs.get_string1(), "test1");
             assert_eq!(prefs.get_string2(), "new default value");
@@ -476,7 +495,8 @@ mod tests {
         handle.join().unwrap(); // Wait for thread to finish.
 
         // Verify instance can be loaded after release.
-        let _prefs = TestEasyPreferences::load("com.example.app").expect("Failed to load after drop");
+        let _prefs =
+            TestEasyPreferences::load("com.example.app").expect("Failed to load after drop");
 
         // Verify that `load_testing()` ignores the single-instance constraint.
         let _test1 = TestEasyPreferences::load_testing();
