@@ -132,7 +132,7 @@ macro_rules! easy_prefs {
             }
 
             impl $name {
-                const PREFERENCES_FILENAME: &'static str = concat!($preferences_filename, ".toml");
+                pub const PREFERENCES_FILENAME: &'static str = concat!($preferences_filename, ".toml");
 
                 pub fn load_default(directory: &str) -> Self {
                     let guard = [<$name InstanceGuard>];
