@@ -12,6 +12,7 @@
 //! - **Safety**: Uses temporary files for writes to prevent data corruption.
 //! - **Performance**: Optimized for fast operations.
 //! - **Testability**: Integrates seamlessly with unit tests.
+//! - **Cross-Platform**: Works on native platforms and WebAssembly (WASM).
 //!
 //! **Limitation**: Not suited for large datasets. All data is held in memory, and the entire file
 //! is rewritten on save. For substantial data, use a database instead.
@@ -27,7 +28,13 @@
 //! The `load()` function returns a `Result` with `LoadError` variants instead of panicking.
 //! Errors include existing instances, directory issues, or file operation failures. See
 //! [`load()`](#method.load) for details.
+//!
+//! ## WASM Support
+//!
+//! This library supports WebAssembly targets for use in browser extensions and web applications.
+//! When compiled to WASM, preferences are stored in localStorage instead of the file system.
 
+pub mod storage;
 
 // Re-export dependencies for convenience
 pub use paste;       // Macro utilities
@@ -56,7 +63,9 @@ pub enum LoadError {
     /// Failed to read/write the file.
     FileReadError(std::io::Error),
     /// Failed to deserialize TOML data.
-    DeserializationError(std::path::PathBuf, toml::de::Error),
+    DeserializationError(String, toml::de::Error),
+    /// Storage operation failed
+    StorageError(std::io::Error),
 }
 
 impl std::fmt::Display for LoadError {
@@ -66,7 +75,8 @@ impl std::fmt::Display for LoadError {
             Self::ProjectDirsError(msg) => write!(f, "project directories error: {}", msg),
             Self::FileOpenError(e) => write!(f, "file open error: {}", e),
             Self::FileReadError(e) => write!(f, "file read/write error: {}", e),
-            Self::DeserializationError(path, e) => write!(f, "error: {}, file: {:?}", e, path),
+            Self::DeserializationError(location, e) => write!(f, "error: {}, location: {}", e, location),
+            Self::StorageError(e) => write!(f, "storage error: {}", e),
         }
     }
 }
@@ -112,8 +122,11 @@ macro_rules! easy_prefs {
                     $field_vis [<_ $field>]: $type,
                 )*
                 #[serde(skip_serializing, skip_deserializing)]
-                full_path: Option<std::path::PathBuf>,
+                storage: Option<Box<dyn $crate::storage::Storage>>,
                 #[serde(skip_serializing, skip_deserializing)]
+                storage_key: Option<String>,
+                #[serde(skip_serializing, skip_deserializing)]
+                #[cfg(not(target_arch = "wasm32"))]
                 temp_file: Option<tempfile::NamedTempFile>,
                 #[serde(skip_serializing, skip_deserializing)]
                 _instance_guard: Option<[<$name InstanceGuard>]>,
@@ -123,7 +136,9 @@ macro_rules! easy_prefs {
                 fn default() -> Self {
                     Self {
                         $( [<_ $field>]: $default, )*
-                        full_path: None,
+                        storage: None,
+                        storage_key: None,
+                        #[cfg(not(target_arch = "wasm32"))]
                         temp_file: None,
                         _instance_guard: None,
                     }
@@ -171,41 +186,58 @@ macro_rules! easy_prefs {
                     }
 
                     let guard = [<$name InstanceGuard>];
-                    let path = std::path::PathBuf::from(directory).join(Self::PREFERENCES_FILENAME);
+                    let storage = $crate::storage::create_storage(directory);
+                    let storage_key = Self::PREFERENCES_FILENAME;
 
-                    let mut cfg = if path.exists() {
-                        let mut file = std::fs::File::open(&path)
-                            .map_err($crate::LoadError::FileOpenError)?;
-                        let mut contents = String::new();
-                        std::io::Read::read_to_string(&mut file, &mut contents)
-                            .map_err($crate::LoadError::FileReadError)?;
-                            match $crate::toml::from_str::<Self>(&contents) {
-                                Ok(mut out) => { out.full_path = Some(path); out },
-                                Err(e) => {
-                                    return Err($crate::LoadError::DeserializationError(path.clone(), e));
-                                }
-                            }
-                    } else {
-                        let mut default = Self::default();
-                        default.full_path = Some(path);
-                        default
+                    let mut cfg = match storage.read(storage_key).map_err($crate::LoadError::StorageError)? {
+                        Some(contents) => {
+                            $crate::toml::from_str::<Self>(&contents)
+                                .map_err(|e| $crate::LoadError::DeserializationError(
+                                    storage.get_path(storage_key), e
+                                ))?
+                        }
+                        None => Self::default(),
                     };
+                    
+                    cfg.storage = Some(storage);
+                    cfg.storage_key = Some(storage_key.to_string());
                     cfg._instance_guard = Some(guard);
                     Ok(cfg)
                 }
 
-                /// Loads preferences into a temporary file for testing (ignores the single-instance constraint).
+                /// Loads preferences into a temporary location for testing (ignores the single-instance constraint).
+                #[cfg(not(target_arch = "wasm32"))]
                 pub fn load_testing() -> Self {
                     let tmp_file = tempfile::NamedTempFile::with_prefix(Self::PREFERENCES_FILENAME)
                         .expect("Failed to create temporary file for testing preferences");
-                    let path = tmp_file.path().to_path_buf();
+                    let tmp_dir = tmp_file.path().parent().unwrap().to_str().unwrap();
+                    let storage = $crate::storage::create_storage(tmp_dir);
+                    let storage_key = tmp_file.path().file_name().unwrap().to_str().unwrap();
+                    
                     let mut cfg = Self::default();
-                    let mut file = std::fs::File::create(&path)
-                        .expect("Failed to create preferences file for testing");
-                    std::io::Write::write_all(&mut file, $crate::toml::to_string(&cfg).unwrap().as_bytes())
+                    let serialized = $crate::toml::to_string(&cfg).unwrap();
+                    storage.write(storage_key, &serialized)
                         .expect("Failed to write preferences data to temporary file");
-                    cfg.full_path = Some(path);
+                    
+                    cfg.storage = Some(storage);
+                    cfg.storage_key = Some(storage_key.to_string());
                     cfg.temp_file = Some(tmp_file);
+                    cfg
+                }
+                
+                /// Loads preferences into a temporary location for testing (ignores the single-instance constraint).
+                #[cfg(target_arch = "wasm32")]
+                pub fn load_testing() -> Self {
+                    let test_id = format!("test_{}", std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis());
+                    let storage = $crate::storage::create_storage(&test_id);
+                    let storage_key = Self::PREFERENCES_FILENAME;
+                    
+                    let mut cfg = Self::default();
+                    cfg.storage = Some(storage);
+                    cfg.storage_key = Some(storage_key.to_string());
                     cfg
                 }
 
@@ -230,21 +262,16 @@ macro_rules! easy_prefs {
                 /// - Returns an error if serialization fails.
                 /// - Returns an error if writing to the temporary file or persisting it fails.
                 pub fn save(&self) -> Result<(), std::io::Error> {
-                    // Ensure the full_path is set
-                    let path = self.full_path.as_ref().ok_or_else(|| std::io::Error::new(
+                    // Ensure storage is initialized
+                    let storage = self.storage.as_ref().ok_or_else(|| std::io::Error::new(
                         std::io::ErrorKind::Other,
-                        "path not set"
+                        "storage not initialized"
                     ))?;
-
-                    // Get the parent directory and ensure it exists
-                    let parent_dir = path.parent().ok_or_else(|| std::io::Error::new(
+                    
+                    let storage_key = self.storage_key.as_ref().ok_or_else(|| std::io::Error::new(
                         std::io::ErrorKind::Other,
-                        format!("no parent directory for '{}'", path.display())
+                        "storage key not set"
                     ))?;
-                    std::fs::create_dir_all(parent_dir)?;
-
-                    // Create a temporary file in the parent directory
-                    let mut tmp_file = tempfile::NamedTempFile::new_in(parent_dir)?;
 
                     // Serialize the preferences data to TOML
                     let serialized = $crate::toml::to_string(self).map_err(|e| std::io::Error::new(
@@ -252,28 +279,18 @@ macro_rules! easy_prefs {
                         format!("serialization failed: {}", e)
                     ))?;
 
-                    // Write the serialized data to the temporary file
-                    std::io::Write::write_all(&mut tmp_file, serialized.as_bytes())?;
-
-                    // Persist the temporary file to the final path
-                    tmp_file.persist(path).map_err(|persist_err| {
-                        std::io::Error::new(
-                            persist_err.error.kind(),
-                            format!(
-                                "failed to save '{}' (testing: {}): {}",
-                                path.display(),
-                                self.temp_file.is_some(),
-                                persist_err.error
-                            )
-                        )
-                    })?;
+                    // Write to storage
+                    storage.write(storage_key, &serialized)?;
 
                     Ok(())
                 }
 
-                /// Returns the file path as a string.
+                /// Returns the storage path/key as a string.
                 pub fn get_preferences_file_path(&self) -> String {
-                    self.full_path.as_ref().expect("full_path must be set").to_str().unwrap().to_string()
+                    match (&self.storage, &self.storage_key) {
+                        (Some(storage), Some(key)) => storage.get_path(key),
+                        _ => panic!("storage not initialized"),
+                    }
                 }
 
                 $(
@@ -294,8 +311,8 @@ macro_rules! easy_prefs {
                 )*
 
                 /// Creates an edit guard for batching updates (saves on drop).
-                pub fn edit(&mut self) -> [<EditGuard_ $name>] {
-                    [<EditGuard_ $name>] {
+                pub fn edit(&mut self) -> [<$name EditGuard>] {
+                    [<$name EditGuard>] {
                         preferences: self,
                         modified: false,
                         created: std::time::Instant::now()
@@ -304,13 +321,13 @@ macro_rules! easy_prefs {
             }
 
             /// Guard for batch editing; saves changes on drop if any fields were modified.
-            struct [<EditGuard_ $name>]<'a> {
+            struct [<$name EditGuard>]<'a> {
                 preferences: &'a mut $name,
                 modified: bool,
                 created: std::time::Instant,
             }
 
-            impl<'a> [<EditGuard_ $name>]<'a> {
+            impl<'a> [<$name EditGuard>]<'a> {
                 $(
                     /// Sets the field's value (save is deferred until the guard is dropped).
                     pub fn [<set_ $field>](&mut self, value: $type) {
@@ -327,7 +344,7 @@ macro_rules! easy_prefs {
                 )*
             }
 
-            impl<'a> Drop for [<EditGuard_ $name>]<'a> {
+            impl<'a> Drop for [<$name EditGuard>]<'a> {
                 fn drop(&mut self) {
                     if cfg!(debug_assertions) && !std::thread::panicking() {
                         let duration = self.created.elapsed();
@@ -383,10 +400,17 @@ mod tests {
         prefs.save_bool1_default_true(false).expect("Failed to save bool1");
         prefs.save_string1("hi".to_string()).expect("Failed to save string1");
 
-        let contents = std::fs::read_to_string(prefs.get_preferences_file_path())
-            .expect("Failed to read file");
-        assert!(contents.contains("bool1_default_true = false"));
-        assert!(contents.contains("string1 = \"hi\""));
+        // Verify the values were saved
+        let file_path = prefs.get_preferences_file_path();
+        assert!(file_path.contains("test-easy-prefs"));
+        // For native platforms, we can verify the file contents
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let contents = std::fs::read_to_string(&file_path)
+                .expect("Failed to read file");
+            assert!(contents.contains("bool1_default_true = false"));
+            assert!(contents.contains("string1 = \"hi\""));
+        }
     }
 
     /// Tests the edit guard batching and save-on-drop functionality.
@@ -401,10 +425,14 @@ mod tests {
         assert_eq!(prefs.get_bool1_default_true(), &false);
         assert_eq!(prefs.get_int1(), &43);
 
-        let contents = std::fs::read_to_string(prefs.get_preferences_file_path())
-            .expect("Failed to read file");
-        assert!(contents.contains("bool1_default_true = false"));
-        assert!(contents.contains("int1 = 43"));
+        // Verify the values were saved
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let contents = std::fs::read_to_string(prefs.get_preferences_file_path())
+                .expect("Failed to read file");
+            assert!(contents.contains("bool1_default_true = false"));
+            assert!(contents.contains("int1 = 43"));
+        }
     }
 
     /// Tests multithreading with Arc/Mutex using `load_testing()`.
