@@ -8,9 +8,6 @@ pub trait Storage: Send + Sync + Debug {
     /// Write data to storage
     fn write(&self, key: &str, data: &str) -> Result<(), std::io::Error>;
     
-    /// Check if a key exists in storage
-    fn exists(&self, key: &str) -> Result<bool, std::io::Error>;
-    
     /// Get the full path/key for display purposes
     fn get_path(&self, key: &str) -> String;
 }
@@ -67,9 +64,7 @@ pub mod native {
             Ok(())
         }
         
-        fn exists(&self, key: &str) -> Result<bool, std::io::Error> {
-            Ok(self.base_dir.join(key).exists())
-        }
+
         
         fn get_path(&self, key: &str) -> String {
             self.base_dir.join(key).display().to_string()
@@ -80,7 +75,6 @@ pub mod native {
 #[cfg(target_arch = "wasm32")]
 pub mod wasm {
     use super::Storage;
-    use wasm_bindgen::prelude::*;
     use web_sys::{Storage as WebStorage, window};
     
     #[derive(Debug)]
@@ -140,9 +134,7 @@ pub mod wasm {
                 ))
         }
         
-        fn exists(&self, key: &str) -> Result<bool, std::io::Error> {
-            self.read(key).map(|opt| opt.is_some())
-        }
+
         
         fn get_path(&self, key: &str) -> String {
             format!("localStorage::{}", self.full_key(key))

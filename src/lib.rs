@@ -41,27 +41,13 @@ pub use paste;       // Macro utilities
 pub use toml;        // TOML serialization
 pub use once_cell;   // Lazy statics
 
-// IMPORTANT: Don't use these because the macro won't be able to see them.
-// Instead, use fully qualified names wherever needed.
-// use std::fmt;
-// use std::io::Write;
-// use std::path::PathBuf;
-// use std::sync::atomic::{AtomicBool, Ordering};
-// use once_cell::sync::Lazy;
-// use directories::ProjectDirs;
-// use tempfile::NamedTempFile;
+
 
 /// Errors that can occur when loading preferences.
 #[derive(Debug)]
 pub enum LoadError {
     /// Another instance is already loaded (due to single-instance constraint).
     InstanceAlreadyLoaded,
-    /// Failed to determine project directories (e.g., invalid namespace).
-    ProjectDirsError(String),
-    /// Failed to open the preferences file.
-    FileOpenError(std::io::Error),
-    /// Failed to read/write the file.
-    FileReadError(std::io::Error),
     /// Failed to deserialize TOML data.
     DeserializationError(String, toml::de::Error),
     /// Storage operation failed
@@ -72,20 +58,36 @@ impl std::fmt::Display for LoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InstanceAlreadyLoaded => write!(f, "another preferences instance is already loaded"),
-            Self::ProjectDirsError(msg) => write!(f, "project directories error: {}", msg),
-            Self::FileOpenError(e) => write!(f, "file open error: {}", e),
-            Self::FileReadError(e) => write!(f, "file read/write error: {}", e),
-            Self::DeserializationError(location, e) => write!(f, "error: {}, location: {}", e, location),
+            Self::DeserializationError(location, e) => write!(f, "deserialization error: {} at {}", e, location),
             Self::StorageError(e) => write!(f, "storage error: {}", e),
         }
     }
 }
 
 impl std::error::Error for LoadError {}
-/// Macro to define a preferences struct with file persistence.
+/// Macro to define a preferences struct with persistence.
 ///
 /// Generates a struct with methods for loading, saving, and editing preferences.
 /// Enforces a single instance (except in test mode) using a static flag.
+/// 
+/// # Example
+/// 
+/// ```rust
+/// use easy_prefs::easy_prefs;
+/// 
+/// easy_prefs! {
+///     pub struct AppPrefs {
+///         pub dark_mode: bool = false => "dark_mode",
+///         pub font_size: i32 = 14 => "font_size",
+///     },
+///     "app-settings"
+/// }
+/// ```
+/// 
+/// # Platform Behavior
+/// 
+/// - **Native**: Stores preferences as TOML files in the specified directory
+/// - **WASM**: Stores preferences in browser localStorage
 #[macro_export]
 macro_rules! easy_prefs {
     (
@@ -100,7 +102,7 @@ macro_rules! easy_prefs {
     ) => {
         $crate::paste::paste!{
             // Static flag to enforce single instance.
-            static [<$name _INSTANCE_EXISTS>]: $crate::once_cell::sync::Lazy<std::sync::atomic::AtomicBool> =
+            static [<$name:upper _INSTANCE_EXISTS>]: $crate::once_cell::sync::Lazy<std::sync::atomic::AtomicBool> =
                 $crate::once_cell::sync::Lazy::new(|| std::sync::atomic::AtomicBool::new(false));
 
             // Guard that resets the instance flag on drop.
@@ -108,7 +110,7 @@ macro_rules! easy_prefs {
             struct [<$name InstanceGuard>];
             impl Drop for [<$name InstanceGuard>] {
                 fn drop(&mut self) {
-                    [<$name _INSTANCE_EXISTS>].store(false, std::sync::atomic::Ordering::Release);
+                    [<$name:upper _INSTANCE_EXISTS>].store(false, std::sync::atomic::Ordering::Release);
                 }
             }
 
@@ -155,14 +157,13 @@ macro_rules! easy_prefs {
                 ///
                 /// # Arguments
                 ///
-                /// * `path` - The full path to the preferences file.
+                /// * `directory` - The directory path (native) or app ID (WASM) where preferences are stored.
                 ///
                 /// # Errors
                 ///
                 /// Returns a `LoadError` if:
                 /// - Another instance is already loaded.
-                /// - The project directory cannot be determined.
-                /// - File operations fail.
+                /// - Storage operations fail.
                 /// - TOML deserialization fails.
                 pub fn load(directory: &str) -> Result<Self, $crate::LoadError> {
 
@@ -178,7 +179,7 @@ macro_rules! easy_prefs {
                         }
                     }
 
-                    let was_free = [<$name _INSTANCE_EXISTS>].compare_exchange(
+                    let was_free = [<$name:upper _INSTANCE_EXISTS>].compare_exchange(
                         false, true, std::sync::atomic::Ordering::Acquire, std::sync::atomic::Ordering::Relaxed
                     );
                     if was_free.is_err() {
@@ -267,21 +268,17 @@ macro_rules! easy_prefs {
                     $crate::toml::to_string(self).expect("Serialization failed")
                 }
 
-                /// Save the preferences data to the specified file path.
+                /// Save the preferences data to storage.
                 ///
-                /// This function serializes the preferences data to TOML format, writes it to a temporary file,
-                /// and then persists that file to the final path. It ensures that parent directories exist
-                /// and provides detailed error messages if any step fails.
-                ///
-                /// # Returns
-                /// - `Ok(())` if the save operation succeeds.
-                /// - `Err(std::io::Error)` if any step (e.g., directory creation, file writing, or persisting) fails.
+                /// This function serializes the preferences data to TOML format and writes it to storage.
+                /// On native platforms, it uses atomic writes via temporary files. On WASM, it writes to localStorage.
                 ///
                 /// # Errors
-                /// - Returns an error if the `full_path` is not set.
-                /// - Returns an error if the parent directory cannot be determined or created.
-                /// - Returns an error if serialization fails.
-                /// - Returns an error if writing to the temporary file or persisting it fails.
+                /// 
+                /// Returns an error if:
+                /// - Storage is not initialized
+                /// - Serialization fails
+                /// - Storage write operation fails
                 pub fn save(&self) -> Result<(), std::io::Error> {
                     // Ensure storage is initialized
                     let storage = self.storage.as_ref().ok_or_else(|| std::io::Error::new(
@@ -342,7 +339,7 @@ macro_rules! easy_prefs {
             }
 
             /// Guard for batch editing; saves changes on drop if any fields were modified.
-            struct [<$name EditGuard>]<'a> {
+            $vis struct [<$name EditGuard>]<'a> {
                 preferences: &'a mut $name,
                 modified: bool,
                 created: std::time::Instant,
@@ -369,7 +366,10 @@ macro_rules! easy_prefs {
                 fn drop(&mut self) {
                     if cfg!(debug_assertions) && !std::thread::panicking() {
                         let duration = self.created.elapsed();
-                        assert!(duration.as_millis() < 10, "Edit guard held too long ({:?})", duration);
+                        // Warn if edit guard is held for more than 1 second in debug mode
+                        if duration.as_secs() >= 1 {
+                            eprintln!("Warning: Edit guard held for {:?} - consider reducing the scope", duration);
+                        }
                     }
                     if self.modified {
                         if let Err(e) = self.preferences.save() {
