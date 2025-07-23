@@ -141,6 +141,23 @@ For unit tests, use `load_testing()`, which:
 - Creates a temporary file (cleaned up after the test).
 - Bypasses the single-instance constraint, making testing simpler.
 
+### Creating with Defaults using `load_default()`
+
+When you want to create a new preferences file with default values without attempting to read existing data:
+
+```rust
+// Create preferences with defaults (bypasses single-instance check)
+let prefs = AppPreferences::load_default("./com.mycompany.myapp");
+
+// The file will be created when you save
+prefs.save().expect("Failed to save defaults");
+```
+
+This is useful for:
+- Initializing preferences for the first time
+- Resetting preferences to defaults
+- Creating multiple instances (bypasses the single-instance constraint)
+
 ### Edit Guards and Debug Checks
 
 When batching updates with an edit guard:
@@ -151,6 +168,9 @@ When batching updates with an edit guard:
 
 - **get_preferences_file_path():**  
   Returns the full path of the preferences file as a string, useful for debugging.
+
+- **load_default():**  
+  Creates a preferences instance with default values without reading from storage. This method bypasses the single-instance constraint and is useful when you want to create a new preferences file with defaults.
 
 ### Customizable Storage Keys
 

@@ -146,7 +146,7 @@ macro_rules! easy_prefs {
             }
 
             impl $name {
-                const PREFERENCES_FILENAME: &'static str = concat!($preferences_filename, ".toml");
+                pub const PREFERENCES_FILENAME: &'static str = concat!($preferences_filename, ".toml");
 
                 /// Loads preferences from a file, enforcing the single-instance constraint.
                 ///
@@ -203,6 +203,27 @@ macro_rules! easy_prefs {
                     cfg.storage_key = Some(storage_key.to_string());
                     cfg._instance_guard = Some(guard);
                     Ok(cfg)
+                }
+
+                /// Creates a preferences instance with default values without loading from storage.
+                /// 
+                /// This method bypasses the single-instance constraint and doesn't attempt to read
+                /// from storage. The preferences will be saved to the specified directory when
+                /// save() is called.
+                /// 
+                /// # Arguments
+                /// 
+                /// * `directory_or_app_id` - The directory path (native) or app ID (WASM)
+                pub fn load_default(directory_or_app_id: &str) -> Self {
+                    let guard = [<$name InstanceGuard>];
+                    let storage = $crate::storage::create_storage(directory_or_app_id);
+                    let storage_key = Self::PREFERENCES_FILENAME;
+                    
+                    let mut default = Self::default();
+                    default.storage = Some(storage);
+                    default.storage_key = Some(storage_key.to_string());
+                    default._instance_guard = Some(guard);
+                    default
                 }
 
                 /// Loads preferences into a temporary location for testing (ignores the single-instance constraint).
