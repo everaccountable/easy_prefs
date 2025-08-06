@@ -218,14 +218,14 @@ macro_rules! easy_prefs {
                 ///
                 /// * `directory_or_app_id` - The directory path (native) or app ID (WASM)
                 pub fn load_default(directory_or_app_id: &str) -> Self {
-                    let guard = [<$name InstanceGuard>];
+                    // Don't take the instance guard to allow multiple instances
                     let storage = $crate::storage::create_storage(directory_or_app_id);
                     let storage_key = Self::PREFERENCES_FILENAME;
 
                     let mut default = Self::default();
                     default.storage = Some(storage);
                     default.storage_key = Some(storage_key.to_string());
-                    default._instance_guard = Some(guard);
+                    default._instance_guard = None; // No guard = bypasses single-instance constraint
                     default
                 }
 

@@ -109,8 +109,8 @@ pub fn init_extension() -> Result<(), JsValue> {
 
 ### Storage Locations
 
-- **Native platforms**: Files stored in the specified directory
-- **WASM/Browser**: Data stored in localStorage with keys prefixed by your app ID
+- **Native platforms**: Files stored in the specified directory (directory will be created if it doesn't exist)
+- **WASM/Browser**: Data stored in localStorage with keys prefixed by your app ID (slashes and dots in the app ID are replaced with underscores)
 
 ## Detailed Information
 
@@ -119,9 +119,8 @@ pub fn init_extension() -> Result<(), JsValue> {
 - **LoadError Enum:**  
   The library defines a `LoadError` enum with these variants:
   - **InstanceAlreadyLoaded:** Only one instance can be loaded at a time.
-  - **ProjectDirsError:** Issues with determining the configuration directory.
-  - **FileOpenError / FileReadError:** Problems during file I/O.
-  - **DeserializationError:** Errors while parsing TOML data.
+  - **DeserializationError:** Errors while parsing TOML data (includes location info).
+  - **StorageError:** General storage operation failures (wraps std::io::Error).
 
 
 ### Use Across Threads
@@ -156,12 +155,13 @@ prefs.save().expect("Failed to save defaults");
 This is useful for:
 - Initializing preferences for the first time
 - Resetting preferences to defaults
+- Creating a preferences file without attempting to read existing data
 - Creating multiple instances (bypasses the single-instance constraint)
 
 ### Edit Guards and Debug Checks
 
 When batching updates with an edit guard:
-- An assertion (active only in debug builds) ensures the guard isn’t held for more than 10ms to prevent blocking.
+- A warning (active only in debug builds) ensures the guard isn’t held for more than 1 second to prevent blocking.
 - This safety check helps catch long-held locks during development.
 
 ### Utility Methods
@@ -189,7 +189,7 @@ The macro requires [Serde](https://serde.rs) for serialization/deserialization a
 
 ## License
 
-MIT License
+MIT OR Apache-2.0
 
 ```
 Copyright (c) 2023 Ever Accountable

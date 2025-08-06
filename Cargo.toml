@@ -22,8 +22,6 @@ console_error_panic_hook = "0.1.7"
 
 # Native dependencies (not used in WASM)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wasm-bindgen = "0.2"
-directories = "6.0.0"
 tempfile = "3.17.1"
 
 # WASM dependencies
