@@ -39,7 +39,8 @@ pub mod storage;
 // Re-export dependencies for convenience
 pub use once_cell;
 pub use paste; // Macro utilities
-pub use toml; // TOML serialization // Lazy statics
+pub use toml; // TOML serialization
+pub use web_time; // Cross-platform time implementation
 
 /// Errors that can occur when loading preferences.
 #[derive(Debug)]
@@ -252,8 +253,8 @@ macro_rules! easy_prefs {
                 /// Loads preferences into a temporary location for testing (ignores the single-instance constraint).
                 #[cfg(target_arch = "wasm32")]
                 pub fn load_testing() -> Self {
-                    let test_id = format!("test_{}", std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
+                    let test_id = format!("test_{}", web_time::SystemTime::now()
+                        .duration_since(web_time::UNIX_EPOCH)
                         .unwrap()
                         .as_millis());
                     let storage = $crate::storage::create_storage(&test_id);
@@ -335,7 +336,7 @@ macro_rules! easy_prefs {
                     [<$name EditGuard>] {
                         preferences: self,
                         modified: false,
-                        created: std::time::Instant::now()
+                        created: web_time::Instant::now()
                     }
                 }
             }
@@ -344,7 +345,7 @@ macro_rules! easy_prefs {
             $vis struct [<$name EditGuard>]<'a> {
                 preferences: &'a mut $name,
                 modified: bool,
-                created: std::time::Instant,
+                created: web_time::Instant,
             }
 
             impl<'a> [<$name EditGuard>]<'a> {
@@ -390,7 +391,7 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Barrier, Mutex};
     use std::thread;
-    use std::time::Duration;
+    use web_time::Duration;
 
     #[cfg(debug_assertions)]
     easy_prefs! {

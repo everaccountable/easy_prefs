@@ -3,6 +3,8 @@
 //! To build for WASM:
 //! cargo build --example wasm_usage --target wasm32-unknown-unknown --features wasm
 
+#![cfg(target_arch = "wasm32")]
+
 use easy_prefs::easy_prefs;
 use wasm_bindgen::prelude::*;
 
@@ -69,7 +71,12 @@ impl ExtensionPrefs {
 
 // This would be called from JavaScript in your Safari extension
 #[wasm_bindgen(start)]
-pub fn main() {
+pub fn init() {
     // Set up any WASM-specific initialization here
     console_error_panic_hook::set_once();
+}
+
+// Required for the example to compile
+fn main() {
+    // This example is designed to be used as a WASM library, not as a binary
 }
