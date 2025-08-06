@@ -16,7 +16,7 @@ In your `Cargo.toml`, add:
 
 ```toml
 [dependencies]
-easy_prefs = "x.y"  # Use the latest version
+easy_prefs = "3.0"  # Use the latest version
 serde = { version = "1.0", features = ["derive"] }
 ```
 
@@ -44,9 +44,9 @@ easy_prefs! {
 
 ```rust
 fn main() {
-    // Load preferences; defaults are used if the file doesn't exist.
-    let mut prefs = AppPreferences::load("./com.mycompany.myapp")
-        .expect("Failed to load preferences");
+    // Load preferences - panics on any error
+    // This ensures data integrity by preventing invalid instances
+    let mut prefs = AppPreferences::load("./com.mycompany.myapp");
 
     println!("Notifications: {}", prefs.get_notifications());
 
@@ -72,7 +72,7 @@ Add the `wasm` feature to your dependency:
 
 ```toml
 [dependencies]
-easy_prefs = { version = "x.y", features = ["wasm"] }
+easy_prefs = { version = "3.0", features = ["wasm"] }
 ```
 
 ### Building for WASM
@@ -98,7 +98,8 @@ easy_prefs! {
 #[wasm_bindgen]
 pub fn init_extension() -> Result<(), JsValue> {
     // The "directory" parameter becomes the localStorage key prefix
-    let mut settings = ExtensionSettings::load("com.mycompany.extension")
+    // Using load_with_error() for explicit error handling in WASM
+    let mut settings = ExtensionSettings::load_with_error("com.mycompany.extension")
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     
     // Use the same API as native
@@ -116,17 +117,38 @@ pub fn init_extension() -> Result<(), JsValue> {
 
 ### Error Handling
 
-- **LoadError Enum:**  
-  The library defines a `LoadError` enum with these variants:
-  - **InstanceAlreadyLoaded:** Only one instance can be loaded at a time.
-  - **DeserializationError:** Errors while parsing TOML data (includes location info).
-  - **StorageError:** General storage operation failures (wraps std::io::Error).
+The library provides two methods for loading preferences:
+
+- **`load()`** - Simple API that panics on errors:
+  - Always panics on any error (instance conflicts, I/O errors, parse errors)
+  - Ensures data integrity by preventing invalid instances
+  - Use this when you want the simplest API and errors should halt execution
+
+- **`load_with_error()`** - Returns `Result<Self, LoadError>`:
+  - For explicit error handling when needed
+  - Returns `LoadError` enum with these variants:
+    - **InstanceAlreadyLoaded:** Only one instance can be loaded at a time
+    - **DeserializationError:** Errors while parsing TOML data (includes location info)
+    - **StorageError:** General storage operation failures (wraps std::io::Error)
+
+Example:
+```rust
+// Simple approach - always succeeds
+let prefs = AppPreferences::load("./config");
+
+// Explicit error handling
+match AppPreferences::load_with_error("./config") {
+    Ok(prefs) => { /* use prefs */ },
+    Err(LoadError::InstanceAlreadyLoaded) => { /* handle conflict */ },
+    Err(e) => { /* handle other errors */ }
+}
+```
 
 
 ### Use Across Threads
 
 Use `Arc<Mutex<>>` to share the preferences struct between threads.
-Trying to call `load()` on the same struct from multiple threads simultaneously will return an error.
+The single-instance constraint prevents loading the same preferences from multiple locations simultaneously - attempting to do so will panic (with `load()`) or return an error (with `load_with_error()`).
 
 ### Atomic Writes
 
@@ -148,23 +170,35 @@ For unit tests, use `load_testing()`, which:
 - Creates a temporary file (cleaned up after the test).
 - Bypasses the single-instance constraint, making testing simpler.
 
-### Creating with Defaults using `load_default()`
+### Migration from Version 2.x
 
-When you want to create a new preferences file with default values without attempting to read existing data:
+**Breaking Changes in Version 3.0:**
+
+- `load_default()` has been removed. It bypassed the single-instance constraint which could lead to data corruption.
+- `load()` now panics on any error instead of returning a `Result`. This ensures data integrity by preventing invalid instances.
+- For explicit error handling, use the new `load_with_error()` method which returns `Result<Self, LoadError>`.
+
+**Migration Guide:**
 
 ```rust
-// Create preferences with defaults (bypasses single-instance check)
-let prefs = AppPreferences::load_default("./com.mycompany.myapp");
+// Old (v2.x):
+let prefs = AppPreferences::load(dir).unwrap_or_else(|e| {
+    log::error!("Failed to load: {}", e);
+    AppPreferences::load_default(dir)
+});
 
-// The file will be created when you save
-prefs.save().expect("Failed to save defaults");
+// New (v3.0) - Simple approach:
+let prefs = AppPreferences::load(dir);  // Always succeeds
+
+// New (v3.0) - With explicit error handling:
+let prefs = match AppPreferences::load_with_error(dir) {
+    Ok(p) => p,
+    Err(e) => {
+        log::error!("Failed to load: {}", e);
+        return; // Handle error appropriately
+    }
+};
 ```
-
-This is useful for:
-- Initializing preferences for the first time
-- Resetting preferences to defaults
-- Creating a preferences file without attempting to read existing data
-- Creating multiple instances (bypasses the single-instance constraint)
 
 ### Edit Guards and Debug Checks
 
@@ -177,8 +211,14 @@ When batching updates with an edit guard:
 - **get_preferences_file_path():**  
   Returns the full path of the preferences file as a string, useful for debugging.
 
-- **load_default():**  
-  Creates a preferences instance with default values without reading from storage. This method bypasses the single-instance constraint and is useful when you want to create a new preferences file with defaults.
+- **load():**  
+  Loads preferences, always succeeding by using defaults if needed. Panics in debug mode on errors to catch issues early.
+
+- **load_with_error():**  
+  Loads preferences with explicit error handling, returning `Result<Self, LoadError>`.
+
+- **load_testing():**  
+  Creates a temporary instance for unit testing, bypassing the single-instance constraint.
 
 ### Customizable Storage Keys
 

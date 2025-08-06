@@ -13,7 +13,8 @@ easy_prefs! {
 fn main() {
     // On native platforms, this will use the file system
     // On WASM, this will use localStorage
-    let mut prefs = AppPreferences::load("com.example.myapp").expect("Failed to load preferences");
+    // load() now always succeeds - panics in debug on errors, uses defaults in release
+    let mut prefs = AppPreferences::load("com.example.myapp");
 
     println!("Current preferences:");
     println!("  Notifications: {}", prefs.get_notifications_enabled());

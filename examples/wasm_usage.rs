@@ -28,7 +28,8 @@ impl ExtensionPrefs {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Result<ExtensionPrefs, JsValue> {
         // In WASM, the "directory" parameter becomes the app ID prefix for localStorage keys
-        let prefs = ExtensionSettings::load("com.example.safari-extension")
+        // Using load_with_error() for explicit error handling in WASM
+        let prefs = ExtensionSettings::load_with_error("com.example.safari-extension")
             .map_err(|e| JsValue::from_str(&format!("Failed to load preferences: {}", e)))?;
 
         Ok(ExtensionPrefs { prefs })
