@@ -4,6 +4,8 @@ A simple, safe, and performant preferences library for Rust applications that ma
 
 This macro-based library lets you define your preferences—including default values and custom storage keys—and persist them to disk using TOML. It emphasizes data safety by using atomic writes via temporary files and enforces a single-instance rule to prevent race conditions.
 
+**Now with WebAssembly support!** Use the same API in browser extensions, web apps, and native applications. When compiled to WASM, preferences are stored in localStorage instead of the file system.
+
 *Created by Ever Accountable – an app dedicated to helping people overcome compulsive porn use and become their best selves. More info at [everaccountable.com](https://everaccountable.com).*
 
 ## Quick Start
@@ -60,6 +62,56 @@ fn main() {
 }
 ```
 
+## WebAssembly Support
+
+easy_prefs works seamlessly in WebAssembly environments like Safari extensions and web applications. When compiled to WASM, it automatically uses localStorage instead of the file system.
+
+### Enabling WASM Support
+
+Add the `wasm` feature to your dependency:
+
+```toml
+[dependencies]
+easy_prefs = { version = "x.y", features = ["wasm"] }
+```
+
+### Building for WASM
+
+```bash
+cargo build --target wasm32-unknown-unknown --features wasm
+```
+
+### Usage in Safari Extensions
+
+```rust
+use easy_prefs::easy_prefs;
+use wasm_bindgen::prelude::*;
+
+easy_prefs! {
+    pub struct ExtensionSettings {
+        pub enabled: bool = true => "enabled",
+        pub api_key: String = String::new() => "api_key",
+    },
+    "safari-extension"
+}
+
+#[wasm_bindgen]
+pub fn init_extension() -> Result<(), JsValue> {
+    // The "directory" parameter becomes the localStorage key prefix
+    let mut settings = ExtensionSettings::load("com.mycompany.extension")
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    
+    // Use the same API as native
+    settings.save_enabled(true)?;
+    Ok(())
+}
+```
+
+### Storage Locations
+
+- **Native platforms**: Files stored in the specified directory
+- **WASM/Browser**: Data stored in localStorage with keys prefixed by your app ID
+
 ## Detailed Information
 
 ### Error Handling
@@ -89,6 +141,23 @@ For unit tests, use `load_testing()`, which:
 - Creates a temporary file (cleaned up after the test).
 - Bypasses the single-instance constraint, making testing simpler.
 
+### Creating with Defaults using `load_default()`
+
+When you want to create a new preferences file with default values without attempting to read existing data:
+
+```rust
+// Create preferences with defaults (bypasses single-instance check)
+let prefs = AppPreferences::load_default("./com.mycompany.myapp");
+
+// The file will be created when you save
+prefs.save().expect("Failed to save defaults");
+```
+
+This is useful for:
+- Initializing preferences for the first time
+- Resetting preferences to defaults
+- Creating multiple instances (bypasses the single-instance constraint)
+
 ### Edit Guards and Debug Checks
 
 When batching updates with an edit guard:
@@ -99,6 +168,9 @@ When batching updates with an edit guard:
 
 - **get_preferences_file_path():**  
   Returns the full path of the preferences file as a string, useful for debugging.
+
+- **load_default():**  
+  Creates a preferences instance with default values without reading from storage. This method bypasses the single-instance constraint and is useful when you want to create a new preferences file with defaults.
 
 ### Customizable Storage Keys
 

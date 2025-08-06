@@ -1,6 +1,6 @@
 [package]
 name = "easy_prefs"
-version = "2.0.2"
+version = "2.1.0"
 edition = "2021"
 authors = ["Tyler Patterson <tyler@everaccountable.com>"]
 description = "The simplest to use API we could think of to persist prefs to disk. Basically wrap a macro around a struct (see syntax), then data is saved when you write to it. Performant, testable, thread safe, easy to migrate, and careful to not corrupt your data."
@@ -9,11 +9,29 @@ homepage = "https://everaccountable.com"
 repository = "https://github.com/everaccountable/easy_prefs"
 documentation = "https://docs.rs/easy_prefs"
 
+[features]
+default = []
+wasm = ["web-sys", "wasm-bindgen", "wasm-bindgen-futures", "js-sys"]
+
 [dependencies]
 paste = "1.0.15"
 toml = "0.8.20"
 serde = { version = "1.0.218", features = ["derive"] }
-directories = "6.0.0"
-tempfile = "3.17.1"  # Used to tell us where we can store the user's data on different platforms
 once_cell = "1.20.3"
+console_error_panic_hook = "0.1.7"
 
+# Native dependencies (not used in WASM)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wasm-bindgen = "0.2"
+directories = "6.0.0"
+tempfile = "3.17.1"
+
+# WASM dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Storage", "Window"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
