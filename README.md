@@ -128,11 +128,19 @@ pub fn init_extension() -> Result<(), JsValue> {
 Use `Arc<Mutex<>>` to share the preferences struct between threads.
 Trying to call `load()` on the same struct from multiple threads simultaneously will return an error.
 
-### Temporary Files & Atomic Writes
+### Atomic Writes
 
-To ensure data integrity, writes are performed as follows:
-- Data is first written to a temporary file.
-- The temporary file is renamed to the final file, ensuring the preferences file is never left in a partially written state.
+To ensure data integrity, writes are atomic on all platforms:
+
+**Native platforms:**
+- Data is first written to a temporary file
+- The temporary file is atomically renamed to the final file
+- This ensures the preferences file is never left in a partially written state
+
+**WASM/Browser environments:**
+- localStorage provides atomic writes by specification
+- The `setItem()` method either fully succeeds or leaves the old data untouched
+- If the browser crashes or runs out of storage, your existing data remains intact
 
 ### Testing with `load_testing()`
 
