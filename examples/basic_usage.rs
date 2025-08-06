@@ -13,8 +13,7 @@ easy_prefs! {
 fn main() {
     // On native platforms, this will use the file system
     // On WASM, this will use localStorage
-    let mut prefs = AppPreferences::load("com.example.myapp")
-        .expect("Failed to load preferences");
+    let mut prefs = AppPreferences::load("com.example.myapp").expect("Failed to load preferences");
 
     println!("Current preferences:");
     println!("  Notifications: {}", prefs.get_notifications_enabled());
@@ -23,7 +22,9 @@ fn main() {
     println!("  Font size: {}", prefs.get_font_size());
 
     // Update a single value
-    prefs.save_username("Alice".to_string()).expect("Failed to save username");
+    prefs
+        .save_username("Alice".to_string())
+        .expect("Failed to save username");
 
     // Batch updates using edit guard
     {
@@ -37,6 +38,9 @@ fn main() {
     println!("  Username: {}", prefs.get_username());
     println!("  Theme: {}", prefs.get_theme());
     println!("  Font size: {}", prefs.get_font_size());
-    
-    println!("\nPreferences stored at: {}", prefs.get_preferences_file_path());
+
+    println!(
+        "\nPreferences stored at: {}",
+        prefs.get_preferences_file_path()
+    );
 }

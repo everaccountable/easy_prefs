@@ -10,10 +10,10 @@ easy_prefs! {
 #[test]
 fn test_instance_already_loaded_error() {
     let test_dir = format!("/tmp/easy_prefs_error_test_{}", std::process::id());
-    
+
     // First load should succeed
     let _prefs1 = TestErrorPrefs::load(&test_dir).expect("First load should succeed");
-    
+
     // Second load should fail with InstanceAlreadyLoaded
     let result = TestErrorPrefs::load(&test_dir);
     assert!(result.is_err());
@@ -23,7 +23,7 @@ fn test_instance_already_loaded_error() {
         }
         other => panic!("Expected InstanceAlreadyLoaded, got {:?}", other),
     }
-    
+
     // Clean up
     let _ = std::fs::remove_dir_all(&test_dir);
 }
@@ -32,11 +32,11 @@ fn test_instance_already_loaded_error() {
 fn test_deserialization_error() {
     let test_dir = format!("/tmp/easy_prefs_deser_test_{}", std::process::id());
     std::fs::create_dir_all(&test_dir).unwrap();
-    
+
     // Write invalid TOML
     let file_path = format!("{}/test-error-prefs.toml", test_dir);
     std::fs::write(&file_path, "value = \"not a number\"").unwrap();
-    
+
     // Try to load - should fail with deserialization error
     let result = TestErrorPrefs::load(&test_dir);
     assert!(result.is_err());
@@ -46,7 +46,7 @@ fn test_deserialization_error() {
         }
         other => panic!("Expected DeserializationError, got {:?}", other),
     }
-    
+
     // Clean up
     let _ = std::fs::remove_dir_all(&test_dir);
 }

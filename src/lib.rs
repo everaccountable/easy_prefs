@@ -37,11 +37,9 @@
 pub mod storage;
 
 // Re-export dependencies for convenience
-pub use paste;       // Macro utilities
-pub use toml;        // TOML serialization
-pub use once_cell;   // Lazy statics
-
-
+pub use once_cell;
+pub use paste; // Macro utilities
+pub use toml; // TOML serialization // Lazy statics
 
 /// Errors that can occur when loading preferences.
 #[derive(Debug)]
@@ -57,9 +55,13 @@ pub enum LoadError {
 impl std::fmt::Display for LoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InstanceAlreadyLoaded => write!(f, "another preferences instance is already loaded"),
-            Self::DeserializationError(location, e) => write!(f, "deserialization error: {} at {}", e, location),
-            Self::StorageError(e) => write!(f, "storage error: {}", e),
+            Self::InstanceAlreadyLoaded => {
+                write!(f, "another preferences instance is already loaded")
+            }
+            Self::DeserializationError(location, e) => {
+                write!(f, "deserialization error: {e} at {location}")
+            }
+            Self::StorageError(e) => write!(f, "storage error: {e}"),
         }
     }
 }
@@ -69,12 +71,12 @@ impl std::error::Error for LoadError {}
 ///
 /// Generates a struct with methods for loading, saving, and editing preferences.
 /// Enforces a single instance (except in test mode) using a static flag.
-/// 
+///
 /// # Example
-/// 
+///
 /// ```rust
 /// use easy_prefs::easy_prefs;
-/// 
+///
 /// easy_prefs! {
 ///     pub struct AppPrefs {
 ///         pub dark_mode: bool = false => "dark_mode",
@@ -83,9 +85,9 @@ impl std::error::Error for LoadError {}
 ///     "app-settings"
 /// }
 /// ```
-/// 
+///
 /// # Platform Behavior
-/// 
+///
 /// - **Native**: Stores preferences as TOML files in the specified directory
 /// - **WASM**: Stores preferences in browser localStorage
 #[macro_export]
@@ -199,7 +201,7 @@ macro_rules! easy_prefs {
                         }
                         None => Self::default(),
                     };
-                    
+
                     cfg.storage = Some(storage);
                     cfg.storage_key = Some(storage_key.to_string());
                     cfg._instance_guard = Some(guard);
@@ -207,19 +209,19 @@ macro_rules! easy_prefs {
                 }
 
                 /// Creates a preferences instance with default values without loading from storage.
-                /// 
+                ///
                 /// This method bypasses the single-instance constraint and doesn't attempt to read
                 /// from storage. The preferences will be saved to the specified directory when
                 /// save() is called.
-                /// 
+                ///
                 /// # Arguments
-                /// 
+                ///
                 /// * `directory_or_app_id` - The directory path (native) or app ID (WASM)
                 pub fn load_default(directory_or_app_id: &str) -> Self {
                     let guard = [<$name InstanceGuard>];
                     let storage = $crate::storage::create_storage(directory_or_app_id);
                     let storage_key = Self::PREFERENCES_FILENAME;
-                    
+
                     let mut default = Self::default();
                     default.storage = Some(storage);
                     default.storage_key = Some(storage_key.to_string());
@@ -235,18 +237,18 @@ macro_rules! easy_prefs {
                     let tmp_dir = tmp_file.path().parent().unwrap().to_str().unwrap();
                     let storage = $crate::storage::create_storage(tmp_dir);
                     let storage_key = tmp_file.path().file_name().unwrap().to_str().unwrap();
-                    
+
                     let mut cfg = Self::default();
                     let serialized = $crate::toml::to_string(&cfg).unwrap();
                     storage.write(storage_key, &serialized)
                         .expect("Failed to write preferences data to temporary file");
-                    
+
                     cfg.storage = Some(storage);
                     cfg.storage_key = Some(storage_key.to_string());
                     cfg.temp_file = Some(tmp_file);
                     cfg
                 }
-                
+
                 /// Loads preferences into a temporary location for testing (ignores the single-instance constraint).
                 #[cfg(target_arch = "wasm32")]
                 pub fn load_testing() -> Self {
@@ -256,7 +258,7 @@ macro_rules! easy_prefs {
                         .as_millis());
                     let storage = $crate::storage::create_storage(&test_id);
                     let storage_key = Self::PREFERENCES_FILENAME;
-                    
+
                     let mut cfg = Self::default();
                     cfg.storage = Some(storage);
                     cfg.storage_key = Some(storage_key.to_string());
@@ -274,7 +276,7 @@ macro_rules! easy_prefs {
                 /// On native platforms, it uses atomic writes via temporary files. On WASM, it writes to localStorage.
                 ///
                 /// # Errors
-                /// 
+                ///
                 /// Returns an error if:
                 /// - Storage is not initialized
                 /// - Serialization fails
@@ -285,7 +287,7 @@ macro_rules! easy_prefs {
                         std::io::ErrorKind::Other,
                         "storage not initialized"
                     ))?;
-                    
+
                     let storage_key = self.storage_key.as_ref().ok_or_else(|| std::io::Error::new(
                         std::io::ErrorKind::Other,
                         "storage key not set"
@@ -381,35 +383,38 @@ macro_rules! easy_prefs {
         }
     }
 }
-#[cfg(debug_assertions)]
-easy_prefs! {
-    /// Original test preferences.
-    struct TestEasyPreferences {
-        pub bool1_default_true: bool = true => "bool1_default_true",
-        pub bool2_default_true: bool = true => "bool2_default_true",
-        pub bool3_initial_default_false: bool = false => "bool3_initial_default_false",
-        pub string1: String = String::new() => "string1",
-        pub int1: i32 = 42 => "int1",
-    }, "test-easy-prefs"
-}
 
-#[cfg(debug_assertions)]
-easy_prefs! {
-    /// Updated test preferences for schema evolution.
-    pub struct TestEasyPreferencesUpdated {
-        pub bool2_default_true_renamed: bool = true => "bool2_default_true",
-        pub bool3_initial_default_false: bool = true => "bool3_initial_default_false",
-        pub bool4_default_true: bool = true => "bool4_default_true",
-        pub string1: String = "ea".to_string() => "string1",
-        pub string2: String = "new default value".to_string() => "string2",
-    }, "test-easy-prefs"
-}
+#[allow(dead_code)]
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, Barrier};
+    use std::sync::{Arc, Barrier, Mutex};
     use std::thread;
     use std::time::Duration;
+
+    #[cfg(debug_assertions)]
+    easy_prefs! {
+        /// Original test preferences.
+        struct TestEasyPreferences {
+            pub bool1_default_true: bool = true => "bool1_default_true",
+            pub bool2_default_true: bool = true => "bool2_default_true",
+            pub bool3_initial_default_false: bool = false => "bool3_initial_default_false",
+            pub string1: String = String::new() => "string1",
+            pub int1: i32 = 42 => "int1",
+        }, "test-easy-prefs"
+    }
+
+    #[cfg(debug_assertions)]
+    easy_prefs! {
+        /// Updated test preferences for schema evolution.
+        pub struct TestEasyPreferencesUpdated {
+            pub bool2_default_true_renamed: bool = true => "bool2_default_true",
+            pub bool3_initial_default_false: bool = true => "bool3_initial_default_false",
+            pub bool4_default_true: bool = true => "bool4_default_true",
+            pub string1: String = "ea".to_string() => "string1",
+            pub string2: String = "new default value".to_string() => "string2",
+        }, "test-easy-prefs"
+    }
 
     /// Tests loading and saving using `load_testing()` (ignores the single-instance constraint).
     #[test]
@@ -418,8 +423,12 @@ mod tests {
         assert_eq!(prefs.get_bool1_default_true(), &true);
         assert_eq!(prefs.get_int1(), &42);
 
-        prefs.save_bool1_default_true(false).expect("Failed to save bool1");
-        prefs.save_string1("hi".to_string()).expect("Failed to save string1");
+        prefs
+            .save_bool1_default_true(false)
+            .expect("Failed to save bool1");
+        prefs
+            .save_string1("hi".to_string())
+            .expect("Failed to save string1");
 
         // Verify the values were saved
         let file_path = prefs.get_preferences_file_path();
@@ -427,8 +436,7 @@ mod tests {
         // For native platforms, we can verify the file contents
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let contents = std::fs::read_to_string(&file_path)
-                .expect("Failed to read file");
+            let contents = std::fs::read_to_string(&file_path).expect("Failed to read file");
             assert!(contents.contains("bool1_default_true = false"));
             assert!(contents.contains("string1 = \"hi\""));
         }
@@ -489,7 +497,9 @@ mod tests {
         // Save some values.
         {
             let mut prefs = TestEasyPreferences::load("/tmp/tests/").expect("Failed to load");
-            prefs.save_bool1_default_true(false).expect("Failed to save bool1");
+            prefs
+                .save_bool1_default_true(false)
+                .expect("Failed to save bool1");
             prefs.edit().set_string1("test1".to_string());
         }
         // Verify persistence.
@@ -500,7 +510,8 @@ mod tests {
         }
         // Test schema evolution.
         {
-            let prefs = TestEasyPreferencesUpdated::load("/tmp/tests/").expect("Failed to load updated");
+            let prefs =
+                TestEasyPreferencesUpdated::load("/tmp/tests/").expect("Failed to load updated");
             assert_eq!(prefs.get_bool2_default_true_renamed(), &true); // Default (not saved earlier)
             assert_eq!(prefs.get_string1(), "test1");
             assert_eq!(prefs.get_string2(), "new default value");
@@ -525,7 +536,8 @@ mod tests {
         handle.join().unwrap(); // Wait for thread to finish.
 
         // Verify instance can be loaded after release.
-        let _prefs = TestEasyPreferences::load("com.example.app").expect("Failed to load after drop");
+        let _prefs =
+            TestEasyPreferences::load("com.example.app").expect("Failed to load after drop");
 
         // Verify that `load_testing()` ignores the single-instance constraint.
         let _test1 = TestEasyPreferences::load_testing();

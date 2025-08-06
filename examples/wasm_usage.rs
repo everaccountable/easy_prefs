@@ -1,5 +1,5 @@
 //! Example of using easy_prefs in a WASM environment (e.g., Safari extension)
-//! 
+//!
 //! To build for WASM:
 //! cargo build --example wasm_usage --target wasm32-unknown-unknown --features wasm
 
@@ -28,7 +28,7 @@ impl ExtensionPrefs {
         // In WASM, the "directory" parameter becomes the app ID prefix for localStorage keys
         let prefs = ExtensionSettings::load("com.example.safari-extension")
             .map_err(|e| JsValue::from_str(&format!("Failed to load preferences: {}", e)))?;
-        
+
         Ok(ExtensionPrefs { prefs })
     }
 
@@ -39,7 +39,8 @@ impl ExtensionPrefs {
 
     #[wasm_bindgen(setter)]
     pub fn set_enabled(&mut self, value: bool) -> Result<(), JsValue> {
-        self.prefs.save_enabled(value)
+        self.prefs
+            .save_enabled(value)
             .map_err(|e| JsValue::from_str(&format!("Failed to save: {}", e)))
     }
 
@@ -50,7 +51,8 @@ impl ExtensionPrefs {
 
     #[wasm_bindgen(setter)]
     pub fn set_api_key(&mut self, value: String) -> Result<(), JsValue> {
-        self.prefs.save_api_key(value)
+        self.prefs
+            .save_api_key(value)
             .map_err(|e| JsValue::from_str(&format!("Failed to save: {}", e)))
     }
 
