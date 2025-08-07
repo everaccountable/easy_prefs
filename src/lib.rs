@@ -178,33 +178,33 @@ macro_rules! easy_prefs {
                             if matches!(e, $crate::LoadError::InstanceAlreadyLoaded) {
                                 panic!("Failed to load preferences: {}", e);
                             }
-                            
+
                             #[cfg(any(debug_assertions, test))]
                             {
                                 // Panic in debug/test to catch issues early
                                 panic!("Failed to load preferences: {}", e);
                             }
-                            
+
                             #[cfg(not(any(debug_assertions, test)))]
                             {
                                 // In production, log the error and return defaults
                                 eprintln!("Failed to load preferences from {}: {}, using defaults", directory, e);
-                                
+
                                 // We need to acquire the instance guard for the default instance
                                 // First, try to acquire it
                                 let was_free = [<$name:upper _INSTANCE_EXISTS>].compare_exchange(
                                     false, true, std::sync::atomic::Ordering::Acquire, std::sync::atomic::Ordering::Relaxed
                                 );
-                                
+
                                 if was_free.is_err() {
                                     // This should be rare - means load_with_error failed but instance still exists
                                     panic!("Failed to load preferences and instance is still locked: {}", e);
                                 }
-                                
+
                                 let guard = [<$name InstanceGuard>];
                                 let storage = $crate::storage::create_storage(directory);
                                 let storage_key = Self::PREFERENCES_FILENAME;
-                                
+
                                 let mut cfg = Self::default();
                                 cfg.storage = Some(storage);
                                 cfg.storage_key = Some(storage_key.to_string());
@@ -491,7 +491,6 @@ mod tests {
     }
 
     /// Tests loading and saving using `load_testing()` (ignores the single-instance constraint).
-    #[test]
     fn test_load_save_preferences_with_macro() {
         let mut prefs = TestEasyPreferences::load_testing();
         assert_eq!(prefs.get_bool1_default_true(), &true);
@@ -517,7 +516,6 @@ mod tests {
     }
 
     /// Tests the edit guard batching and save-on-drop functionality.
-    #[test]
     fn test_edit_guard() {
         let mut prefs = TestEasyPreferences::load_testing();
         {
@@ -539,7 +537,6 @@ mod tests {
     }
 
     /// Tests multithreading with Arc/Mutex using `load_testing()`.
-    #[test]
     fn test_with_arc_mutex() {
         let prefs = Arc::new(Mutex::new(TestEasyPreferences::load_testing()));
         {
@@ -559,7 +556,6 @@ mod tests {
     /// Combined test for real file operations and the single-instance constraint.
     ///
     /// Running these tests sequentially avoids conflicts caused by the single-instance flag.
-    #[test]
     fn test_real_preferences_and_single_instance() {
         // --- Part 1: Test persistence and schema upgrades ---
         {
@@ -625,11 +621,20 @@ mod tests {
     #[cfg(debug_assertions)]
     fn test_load_panics_on_error_in_debug() {
         let test_dir = "/tmp/tests_panic/";
-        
+
         // First load should succeed
         let _prefs1 = TestEasyPreferences::load(test_dir);
-        
+
         // Second load should panic due to instance already loaded
         let _prefs2 = TestEasyPreferences::load(test_dir);
+    }
+
+    #[test]
+    fn test_all() {
+        // Run all tests sequentially to avoid conflicts with the single-instance constraint
+        test_load_save_preferences_with_macro();
+        test_edit_guard();
+        test_with_arc_mutex();
+        test_real_preferences_and_single_instance();
     }
 }
