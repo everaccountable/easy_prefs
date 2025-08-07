@@ -25,6 +25,10 @@ fn test_load_default_removal_and_new_api() {
     
     // Test 4: load() panics on instance conflict
     test_load_panics_on_instance_conflict();
+    
+    // Test 5: load() returns defaults on errors in release mode
+    #[cfg(not(any(debug_assertions, test)))]
+    test_load_returns_defaults_on_error_in_release();
 }
 
 fn test_load_creates_defaults_when_file_missing() {
@@ -109,4 +113,25 @@ fn test_load_panics_on_instance_conflict() {
     
     // Clean up
     drop(_prefs1);
+}
+
+#[cfg(not(any(debug_assertions, test)))]
+fn test_load_returns_defaults_on_error_in_release() {
+    let test_dir = format!("/tmp/easy_prefs_test_release_{}", std::process::id());
+    std::fs::create_dir_all(&test_dir).unwrap();
+    
+    // Write invalid TOML to cause a deserialization error
+    let file_path = format!("{}/test-default-prefs.toml", test_dir);
+    std::fs::write(&file_path, "invalid toml content [[[").unwrap();
+    
+    // In release mode, load() should return defaults instead of panicking
+    let prefs = TestDefaultPrefs::load(&test_dir);
+    
+    // Verify we got defaults
+    assert_eq!(*prefs.get_enabled(), true);
+    assert_eq!(*prefs.get_count(), 42);
+    assert_eq!(prefs.get_name(), "default");
+    
+    // Clean up
+    let _ = std::fs::remove_dir_all(&test_dir);
 }

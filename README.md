@@ -44,8 +44,9 @@ easy_prefs! {
 
 ```rust
 fn main() {
-    // Load preferences - panics on any error
-    // This ensures data integrity by preventing invalid instances
+    // Load preferences - always succeeds by using defaults if needed
+    // In debug builds: panics on errors to catch issues early  
+    // In release builds: logs errors and returns defaults
     let mut prefs = AppPreferences::load("./com.mycompany.myapp");
 
     println!("Notifications: {}", prefs.get_notifications());
@@ -119,10 +120,11 @@ pub fn init_extension() -> Result<(), JsValue> {
 
 The library provides two methods for loading preferences:
 
-- **`load()`** - Simple API that panics on errors:
-  - Always panics on any error (instance conflicts, I/O errors, parse errors)
-  - Ensures data integrity by preventing invalid instances
-  - Use this when you want the simplest API and errors should halt execution
+- **`load()`** - Simple API that always succeeds:
+  - In release builds: Returns defaults on errors (logs them)
+  - In debug/test builds: Panics on errors to catch issues early
+  - Always panics if another instance is already loaded
+  - Use this for the simplest API where the app should continue even if preferences can't be loaded
 
 - **`load_with_error()`** - Returns `Result<Self, LoadError>`:
   - For explicit error handling when needed
@@ -175,7 +177,7 @@ For unit tests, use `load_testing()`, which:
 **Breaking Changes in Version 3.0:**
 
 - `load_default()` has been removed. It bypassed the single-instance constraint which could lead to data corruption.
-- `load()` now panics on any error instead of returning a `Result`. This ensures data integrity by preventing invalid instances.
+- `load()` now always succeeds instead of returning a `Result`. In release builds it returns defaults on errors, in debug builds it panics to catch issues early.
 - For explicit error handling, use the new `load_with_error()` method which returns `Result<Self, LoadError>`.
 
 **Migration Guide:**

@@ -153,13 +153,12 @@ macro_rules! easy_prefs {
             impl $name {
                 pub const PREFERENCES_FILENAME: &'static str = concat!($preferences_filename, ".toml");
 
-                /// Loads preferences from a file, panicking on any error.
+                /// Loads preferences from a file, gracefully handling errors.
                 ///
-                /// This method ensures data integrity by preventing invalid instances.
-                /// It will panic if:
-                /// - Another instance is already loaded
-                /// - Storage operations fail  
-                /// - TOML deserialization fails
+                /// This method provides a simple API that always succeeds:
+                /// - In release builds: Returns defaults on errors (except instance conflicts)
+                /// - In debug/test builds: Panics on errors to catch issues early
+                /// - Always panics if another instance is already loaded
                 ///
                 /// For explicit error handling, use `load_with_error()` instead.
                 ///
@@ -169,10 +168,8 @@ macro_rules! easy_prefs {
                 ///
                 /// # Panics
                 ///
-                /// In debug/test builds, panics if:
-                /// - Another instance is already loaded
-                /// - Storage operations fail
-                /// - TOML deserialization fails
+                /// - Always panics if another instance is already loaded
+                /// - In debug/test builds only: panics on storage or deserialization errors
                 pub fn load(directory: &str) -> Self {
                     match Self::load_with_error(directory) {
                         Ok(prefs) => prefs,
@@ -190,9 +187,29 @@ macro_rules! easy_prefs {
                             
                             #[cfg(not(any(debug_assertions, test)))]
                             {
-                                // In production, we still need to panic because we can't create
-                                // a valid instance without the guard
-                                panic!("Failed to load preferences: {}", e);
+                                // In production, log the error and return defaults
+                                eprintln!("Failed to load preferences from {}: {}, using defaults", directory, e);
+                                
+                                // We need to acquire the instance guard for the default instance
+                                // First, try to acquire it
+                                let was_free = [<$name:upper _INSTANCE_EXISTS>].compare_exchange(
+                                    false, true, std::sync::atomic::Ordering::Acquire, std::sync::atomic::Ordering::Relaxed
+                                );
+                                
+                                if was_free.is_err() {
+                                    // This should be rare - means load_with_error failed but instance still exists
+                                    panic!("Failed to load preferences and instance is still locked: {}", e);
+                                }
+                                
+                                let guard = [<$name InstanceGuard>];
+                                let storage = $crate::storage::create_storage(directory);
+                                let storage_key = Self::PREFERENCES_FILENAME;
+                                
+                                let mut cfg = Self::default();
+                                cfg.storage = Some(storage);
+                                cfg.storage_key = Some(storage_key.to_string());
+                                cfg._instance_guard = Some(guard);
+                                cfg
                             }
                         }
                     }
