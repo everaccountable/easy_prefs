@@ -25,9 +25,9 @@
 //!
 //! ## Error Handling
 //!
-//! The `load()` function returns a `Result` with `LoadError` variants instead of panicking.
-//! Errors include existing instances, directory issues, or file operation failures. See
-//! [`load()`](#method.load) for details.
+//! The library provides two loading methods:
+//! - `load()` - Always succeeds by returning defaults on errors (panics in debug mode)
+//! - `load_with_error()` - Returns `Result<Self, LoadError>` for explicit error handling
 //!
 //! ## WASM Support
 //!
@@ -284,7 +284,7 @@ macro_rules! easy_prefs {
                 ///
                 /// Use `load()` which handles errors gracefully:
                 /// - In debug/test: Helps catch configuration issues early
-                /// - In production: Falls back to defaults when needed (coming soon)
+                /// - In production: Falls back to defaults when needed
                 ///
                 /// If you need explicit error handling, use `load_with_error()`.
                 ///
