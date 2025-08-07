@@ -2,7 +2,7 @@
 
 A simple, safe, and performant preferences library for Rust applications that makes storing and retrieving settings as easy as reading and writing struct fields.
 
-This macro-based library lets you define your preferences—including default values and custom storage keys—and persist them to disk using TOML. It emphasizes data safety by using atomic writes via temporary files and enforces a single-instance rule to prevent race conditions.
+This macro-based library lets you define your preferences—including default values and custom storage keys—and persist them to disk using TOML. It emphasizes data safety by using atomic writes and enforces a single-instance rule to prevent race conditions.
 
 **Now with WebAssembly support!** Use the same API in browser extensions, web apps, and native applications. When compiled to WASM, preferences are stored in localStorage instead of the file system.
 
@@ -36,7 +36,7 @@ easy_prefs! {
         /// String preference with default "guest", stored as "username"
         pub username: String = "guest".to_string() => "username",
     },
-    "app-preferences"  // This defines the filename (stored in the platform-specific config directory)
+    "app-preferences"  // This defines the filename (app-preferences.toml)
 }
 ```
 
@@ -47,7 +47,7 @@ fn main() {
     // Load preferences - always succeeds by using defaults if needed
     // In debug builds: panics on errors to catch issues early  
     // In release builds: logs errors and returns defaults
-    let mut prefs = AppPreferences::load("./com.mycompany.myapp");
+    let mut prefs = AppPreferences::load("/path/to/config/dir");
 
     println!("Notifications: {}", prefs.get_notifications());
 
@@ -69,11 +69,11 @@ easy_prefs works seamlessly in WebAssembly environments like Safari extensions a
 
 ### Enabling WASM Support
 
-Add the `wasm` feature to your dependency:
+Easy_prefs automatically detects WASM targets, no special features needed:
 
 ```toml
 [dependencies]
-easy_prefs = { version = "3.0", features = ["wasm"] }
+easy_prefs = "3.0"
 ```
 
 ### Building for WASM
@@ -104,7 +104,8 @@ pub fn init_extension() -> Result<(), JsValue> {
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     
     // Use the same API as native
-    settings.save_enabled(true)?;
+    settings.save_enabled(true)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(())
 }
 ```
@@ -124,6 +125,7 @@ The library provides two methods for loading preferences:
   - In release builds: Returns defaults on errors (logs them)
   - In debug/test builds: Panics on errors to catch issues early
   - Always panics if another instance is already loaded
+  - When returning defaults due to errors, storage is still properly configured for future saves
   - Use this for the simplest API where the app should continue even if preferences can't be loaded
 
 - **`load_with_error()`** - Returns `Result<Self, LoadError>`:
@@ -228,7 +230,7 @@ The macro’s syntax (`=> "field_name"`) lets you define a stored key that diffe
 
 ### Dependencies & Serialization
 
-The macro requires [Serde](https://serde.rs) for serialization/deserialization and re-exports helpful crates like `paste`, `toml`, and `once_cell` to manage lazy statics and code generation.
+The macro requires [Serde](https://serde.rs) for serialization/deserialization and re-exports helpful crates like `paste`, `toml`, `once_cell`, and `web_time` to manage lazy statics, code generation, and cross-platform time handling.
 
 ## Limitations
 
