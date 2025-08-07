@@ -24,12 +24,12 @@ fn test_edit_guard_saves_on_drop() {
     }
 
     // Verify values were saved
-    let file_path = prefs.get_preferences_file_path();
+    let _file_path = prefs.get_preferences_file_path();
 
     // For native platforms, verify by reading the file
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let contents = std::fs::read_to_string(&file_path).unwrap();
+        let contents = std::fs::read_to_string(&_file_path).unwrap();
         assert!(contents.contains("value1 = 100"));
         assert!(contents.contains("value2 = \"modified\""));
         assert!(contents.contains("value3 = true"));
@@ -44,11 +44,11 @@ fn test_edit_guard_no_save_without_changes() {
     prefs.save_value1(50).unwrap();
 
     // Get the file path before edit
-    let file_path = prefs.get_preferences_file_path();
+    let _file_path = prefs.get_preferences_file_path();
 
     // Get initial modification time
     #[cfg(not(target_arch = "wasm32"))]
-    let initial_mtime = std::fs::metadata(&file_path).unwrap().modified().unwrap();
+    let initial_mtime = std::fs::metadata(&_file_path).unwrap().modified().unwrap();
 
     // Use edit guard but don't change anything
     {
@@ -61,7 +61,7 @@ fn test_edit_guard_no_save_without_changes() {
     // On native platforms, verify file wasn't modified
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let new_mtime = std::fs::metadata(&file_path).unwrap().modified().unwrap();
+        let new_mtime = std::fs::metadata(&_file_path).unwrap().modified().unwrap();
         assert_eq!(
             initial_mtime, new_mtime,
             "File should not be modified without changes"

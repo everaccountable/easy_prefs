@@ -2,7 +2,7 @@
 
 A simple, safe, and performant preferences library for Rust applications that makes storing and retrieving settings as easy as reading and writing struct fields.
 
-This macro-based library lets you define your preferences—including default values and custom storage keys—and persist them to disk using TOML. It emphasizes data safety by using atomic writes via temporary files and enforces a single-instance rule to prevent race conditions.
+This macro-based library lets you define your preferences—including default values and custom storage keys—and persist them to disk using TOML. It emphasizes data safety by using atomic writes and enforces a single-instance rule to prevent race conditions.
 
 **Now with WebAssembly support!** Use the same API in browser extensions, web apps, and native applications. When compiled to WASM, preferences are stored in localStorage instead of the file system.
 
@@ -16,7 +16,7 @@ In your `Cargo.toml`, add:
 
 ```toml
 [dependencies]
-easy_prefs = "x.y"  # Use the latest version
+easy_prefs = "3.0"  # Use the latest version
 serde = { version = "1.0", features = ["derive"] }
 ```
 
@@ -36,7 +36,7 @@ easy_prefs! {
         /// String preference with default "guest", stored as "username"
         pub username: String = "guest".to_string() => "username",
     },
-    "app-preferences"  // This defines the filename (stored in the platform-specific config directory)
+    "app-preferences"  // This defines the filename (app-preferences.toml)
 }
 ```
 
@@ -44,9 +44,10 @@ easy_prefs! {
 
 ```rust
 fn main() {
-    // Load preferences; defaults are used if the file doesn't exist.
-    let mut prefs = AppPreferences::load("./com.mycompany.myapp")
-        .expect("Failed to load preferences");
+    // Load preferences - always succeeds by using defaults if needed
+    // In debug builds: panics on errors to catch issues early  
+    // In release builds: logs errors and returns defaults
+    let mut prefs = AppPreferences::load("/path/to/config/dir");
 
     println!("Notifications: {}", prefs.get_notifications());
 
@@ -68,11 +69,11 @@ easy_prefs works seamlessly in WebAssembly environments like Safari extensions a
 
 ### Enabling WASM Support
 
-Add the `wasm` feature to your dependency:
+Easy_prefs automatically detects WASM targets, no special features needed:
 
 ```toml
 [dependencies]
-easy_prefs = { version = "x.y", features = ["wasm"] }
+easy_prefs = "3.0"
 ```
 
 ### Building for WASM
@@ -98,42 +99,74 @@ easy_prefs! {
 #[wasm_bindgen]
 pub fn init_extension() -> Result<(), JsValue> {
     // The "directory" parameter becomes the localStorage key prefix
-    let mut settings = ExtensionSettings::load("com.mycompany.extension")
+    // Using load_with_error() for explicit error handling in WASM
+    let mut settings = ExtensionSettings::load_with_error("com.mycompany.extension")
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     
     // Use the same API as native
-    settings.save_enabled(true)?;
+    settings.save_enabled(true)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
     Ok(())
 }
 ```
 
 ### Storage Locations
 
-- **Native platforms**: Files stored in the specified directory
-- **WASM/Browser**: Data stored in localStorage with keys prefixed by your app ID
+- **Native platforms**: Files stored in the specified directory (directory will be created if it doesn't exist)
+- **WASM/Browser**: Data stored in localStorage with keys prefixed by your app ID (slashes and dots in the app ID are replaced with underscores)
 
 ## Detailed Information
 
 ### Error Handling
 
-- **LoadError Enum:**  
-  The library defines a `LoadError` enum with these variants:
-  - **InstanceAlreadyLoaded:** Only one instance can be loaded at a time.
-  - **ProjectDirsError:** Issues with determining the configuration directory.
-  - **FileOpenError / FileReadError:** Problems during file I/O.
-  - **DeserializationError:** Errors while parsing TOML data.
+The library provides two methods for loading preferences:
+
+- **`load()`** - Simple API that always succeeds:
+  - In release builds: Returns defaults on errors (logs them)
+  - In debug/test builds: Panics on errors to catch issues early
+  - Always panics if another instance is already loaded
+  - When returning defaults due to errors, storage is still properly configured for future saves
+  - Use this for the simplest API where the app should continue even if preferences can't be loaded
+
+- **`load_with_error()`** - Returns `Result<Self, LoadError>`:
+  - For explicit error handling when needed
+  - Returns `LoadError` enum with these variants:
+    - **InstanceAlreadyLoaded:** Only one instance can be loaded at a time
+    - **DeserializationError:** Errors while parsing TOML data (includes location info)
+    - **StorageError:** General storage operation failures (wraps std::io::Error)
+
+Example:
+```rust
+// Simple approach - always succeeds
+let prefs = AppPreferences::load("./config");
+
+// Explicit error handling
+match AppPreferences::load_with_error("./config") {
+    Ok(prefs) => { /* use prefs */ },
+    Err(LoadError::InstanceAlreadyLoaded) => { /* handle conflict */ },
+    Err(e) => { /* handle other errors */ }
+}
+```
 
 
 ### Use Across Threads
 
 Use `Arc<Mutex<>>` to share the preferences struct between threads.
-Trying to call `load()` on the same struct from multiple threads simultaneously will return an error.
+The single-instance constraint prevents loading the same preferences from multiple locations simultaneously - attempting to do so will panic (with `load()`) or return an error (with `load_with_error()`).
 
-### Temporary Files & Atomic Writes
+### Atomic Writes
 
-To ensure data integrity, writes are performed as follows:
-- Data is first written to a temporary file.
-- The temporary file is renamed to the final file, ensuring the preferences file is never left in a partially written state.
+To ensure data integrity, writes are atomic on all platforms:
+
+**Native platforms:**
+- Data is first written to a temporary file
+- The temporary file is atomically renamed to the final file
+- This ensures the preferences file is never left in a partially written state
+
+**WASM/Browser environments:**
+- localStorage provides atomic writes by specification
+- The `setItem()` method either fully succeeds or leaves the old data untouched
+- If the browser crashes or runs out of storage, your existing data remains intact
 
 ### Testing with `load_testing()`
 
@@ -141,27 +174,40 @@ For unit tests, use `load_testing()`, which:
 - Creates a temporary file (cleaned up after the test).
 - Bypasses the single-instance constraint, making testing simpler.
 
-### Creating with Defaults using `load_default()`
+### Migration from Version 2.x
 
-When you want to create a new preferences file with default values without attempting to read existing data:
+**Breaking Changes in Version 3.0:**
+
+- `load_default()` has been removed. It bypassed the single-instance constraint which could lead to data corruption.
+- `load()` now always succeeds instead of returning a `Result`. In release builds it returns defaults on errors, in debug builds it panics to catch issues early.
+- For explicit error handling, use the new `load_with_error()` method which returns `Result<Self, LoadError>`.
+
+**Migration Guide:**
 
 ```rust
-// Create preferences with defaults (bypasses single-instance check)
-let prefs = AppPreferences::load_default("./com.mycompany.myapp");
+// Old (v2.x):
+let prefs = AppPreferences::load(dir).unwrap_or_else(|e| {
+    log::error!("Failed to load: {}", e);
+    AppPreferences::load_default(dir)
+});
 
-// The file will be created when you save
-prefs.save().expect("Failed to save defaults");
+// New (v3.0) - Simple approach:
+let prefs = AppPreferences::load(dir);  // Always succeeds
+
+// New (v3.0) - With explicit error handling:
+let prefs = match AppPreferences::load_with_error(dir) {
+    Ok(p) => p,
+    Err(e) => {
+        log::error!("Failed to load: {}", e);
+        return; // Handle error appropriately
+    }
+};
 ```
-
-This is useful for:
-- Initializing preferences for the first time
-- Resetting preferences to defaults
-- Creating multiple instances (bypasses the single-instance constraint)
 
 ### Edit Guards and Debug Checks
 
 When batching updates with an edit guard:
-- An assertion (active only in debug builds) ensures the guard isn’t held for more than 10ms to prevent blocking.
+- A warning (active only in debug builds) ensures the guard isn’t held for more than 1 second to prevent blocking.
 - This safety check helps catch long-held locks during development.
 
 ### Utility Methods
@@ -169,8 +215,14 @@ When batching updates with an edit guard:
 - **get_preferences_file_path():**  
   Returns the full path of the preferences file as a string, useful for debugging.
 
-- **load_default():**  
-  Creates a preferences instance with default values without reading from storage. This method bypasses the single-instance constraint and is useful when you want to create a new preferences file with defaults.
+- **load():**  
+  Loads preferences, always succeeding by using defaults if needed. Panics in debug mode on errors to catch issues early.
+
+- **load_with_error():**  
+  Loads preferences with explicit error handling, returning `Result<Self, LoadError>`.
+
+- **load_testing():**  
+  Creates a temporary instance for unit testing, bypassing the single-instance constraint.
 
 ### Customizable Storage Keys
 
@@ -178,7 +230,7 @@ The macro’s syntax (`=> "field_name"`) lets you define a stored key that diffe
 
 ### Dependencies & Serialization
 
-The macro requires [Serde](https://serde.rs) for serialization/deserialization and re-exports helpful crates like `paste`, `toml`, and `once_cell` to manage lazy statics and code generation.
+The macro requires [Serde](https://serde.rs) for serialization/deserialization and re-exports helpful crates like `paste`, `toml`, `once_cell`, and `web_time` to manage lazy statics, code generation, and cross-platform time handling.
 
 ## Limitations
 
@@ -189,7 +241,7 @@ The macro requires [Serde](https://serde.rs) for serialization/deserialization a
 
 ## License
 
-MIT License
+MIT OR Apache-2.0
 
 ```
 Copyright (c) 2023 Ever Accountable

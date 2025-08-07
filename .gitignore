@@ -1,2 +1,6 @@
 /target
 /.idea
+.DS_Store
+.refact.toml
+/tmp/
+/com.example.myapp/

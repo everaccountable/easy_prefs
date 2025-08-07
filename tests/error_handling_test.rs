@@ -12,10 +12,10 @@ fn test_instance_already_loaded_error() {
     let test_dir = format!("/tmp/easy_prefs_error_test_{}", std::process::id());
 
     // First load should succeed
-    let _prefs1 = TestErrorPrefs::load(&test_dir).expect("First load should succeed");
+    let _prefs1 = TestErrorPrefs::load_with_error(&test_dir).expect("First load should succeed");
 
     // Second load should fail with InstanceAlreadyLoaded
-    let result = TestErrorPrefs::load(&test_dir);
+    let result = TestErrorPrefs::load_with_error(&test_dir);
     assert!(result.is_err());
     match result.unwrap_err() {
         LoadError::InstanceAlreadyLoaded => {
@@ -38,7 +38,7 @@ fn test_deserialization_error() {
     std::fs::write(&file_path, "value = \"not a number\"").unwrap();
 
     // Try to load - should fail with deserialization error
-    let result = TestErrorPrefs::load(&test_dir);
+    let result = TestErrorPrefs::load_with_error(&test_dir);
     assert!(result.is_err());
     match result.unwrap_err() {
         LoadError::DeserializationError(location, _) => {

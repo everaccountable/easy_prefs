@@ -25,9 +25,9 @@
 //!
 //! ## Error Handling
 //!
-//! The `load()` function returns a `Result` with `LoadError` variants instead of panicking.
-//! Errors include existing instances, directory issues, or file operation failures. See
-//! [`load()`](#method.load) for details.
+//! The library provides two loading methods:
+//! - `load()` - Always succeeds by returning defaults on errors (panics in debug mode)
+//! - `load_with_error()` - Returns `Result<Self, LoadError>` for explicit error handling
 //!
 //! ## WASM Support
 //!
@@ -39,7 +39,8 @@ pub mod storage;
 // Re-export dependencies for convenience
 pub use once_cell;
 pub use paste; // Macro utilities
-pub use toml; // TOML serialization // Lazy statics
+pub use toml; // TOML serialization
+pub use web_time; // Cross-platform time implementation
 
 /// Errors that can occur when loading preferences.
 #[derive(Debug)]
@@ -152,7 +153,69 @@ macro_rules! easy_prefs {
             impl $name {
                 pub const PREFERENCES_FILENAME: &'static str = concat!($preferences_filename, ".toml");
 
-                /// Loads preferences from a file, enforcing the single-instance constraint.
+                /// Loads preferences from a file, gracefully handling errors.
+                ///
+                /// This method provides a simple API that always succeeds:
+                /// - In release builds: Returns defaults on errors (except instance conflicts)
+                /// - In debug/test builds: Panics on errors to catch issues early
+                /// - Always panics if another instance is already loaded
+                ///
+                /// For explicit error handling, use `load_with_error()` instead.
+                ///
+                /// # Arguments
+                ///
+                /// * `directory` - The directory path (native) or app ID (WASM) where preferences are stored.
+                ///
+                /// # Panics
+                ///
+                /// - Always panics if another instance is already loaded
+                /// - In debug/test builds only: panics on storage or deserialization errors
+                pub fn load(directory: &str) -> Self {
+                    match Self::load_with_error(directory) {
+                        Ok(prefs) => prefs,
+                        Err(e) => {
+                            // Always panic if another instance exists - this is a programming error
+                            if matches!(e, $crate::LoadError::InstanceAlreadyLoaded) {
+                                panic!("Failed to load preferences: {}", e);
+                            }
+
+                            #[cfg(any(debug_assertions, test))]
+                            {
+                                // Panic in debug/test to catch issues early
+                                panic!("Failed to load preferences: {}", e);
+                            }
+
+                            #[cfg(not(any(debug_assertions, test)))]
+                            {
+                                // In production, log the error and return defaults
+                                eprintln!("Failed to load preferences from {}: {}, using defaults", directory, e);
+
+                                // We need to acquire the instance guard for the default instance
+                                // First, try to acquire it
+                                let was_free = [<$name:upper _INSTANCE_EXISTS>].compare_exchange(
+                                    false, true, std::sync::atomic::Ordering::Acquire, std::sync::atomic::Ordering::Relaxed
+                                );
+
+                                if was_free.is_err() {
+                                    // This should be rare - means load_with_error failed but instance still exists
+                                    panic!("Failed to load preferences and instance is still locked: {}", e);
+                                }
+
+                                let guard = [<$name InstanceGuard>];
+                                let storage = $crate::storage::create_storage(directory);
+                                let storage_key = Self::PREFERENCES_FILENAME;
+
+                                let mut cfg = Self::default();
+                                cfg.storage = Some(storage);
+                                cfg.storage_key = Some(storage_key.to_string());
+                                cfg._instance_guard = Some(guard);
+                                cfg
+                            }
+                        }
+                    }
+                }
+
+                /// Loads preferences from a file with explicit error handling.
                 ///
                 /// Deserializes from file if it exists; otherwise uses defaults.
                 /// Only one instance can exist at a time (tracked by a static flag).
@@ -167,7 +230,7 @@ macro_rules! easy_prefs {
                 /// - Another instance is already loaded.
                 /// - Storage operations fail.
                 /// - TOML deserialization fails.
-                pub fn load(directory: &str) -> Result<Self, $crate::LoadError> {
+                pub fn load_with_error(directory: &str) -> Result<Self, $crate::LoadError> {
 
                     {
                         // Runtime duplicate check for field_names. We don't want duplicates!
@@ -208,25 +271,36 @@ macro_rules! easy_prefs {
                     Ok(cfg)
                 }
 
-                /// Creates a preferences instance with default values without loading from storage.
+                /// DEPRECATED: This method is no longer supported.
                 ///
-                /// This method bypasses the single-instance constraint and doesn't attempt to read
-                /// from storage. The preferences will be saved to the specified directory when
-                /// save() is called.
+                /// # Why was this removed?
                 ///
-                /// # Arguments
+                /// `load_default()` bypassed the single-instance constraint, which could lead to:
+                /// - Data corruption when multiple instances write to the same file
+                /// - Race conditions in concurrent environments
+                /// - Inconsistent application state
                 ///
-                /// * `directory_or_app_id` - The directory path (native) or app ID (WASM)
-                pub fn load_default(directory_or_app_id: &str) -> Self {
-                    let guard = [<$name InstanceGuard>];
-                    let storage = $crate::storage::create_storage(directory_or_app_id);
-                    let storage_key = Self::PREFERENCES_FILENAME;
-
-                    let mut default = Self::default();
-                    default.storage = Some(storage);
-                    default.storage_key = Some(storage_key.to_string());
-                    default._instance_guard = Some(guard);
-                    default
+                /// # What to use instead?
+                ///
+                /// Use `load()` which handles errors gracefully:
+                /// - In debug/test: Helps catch configuration issues early
+                /// - In production: Falls back to defaults when needed
+                ///
+                /// If you need explicit error handling, use `load_with_error()`.
+                ///
+                /// # Panics
+                ///
+                /// Always panics with a deprecation message.
+                #[deprecated(
+                    since = "3.0.0",
+                    note = "Use `load()` instead - it handles errors gracefully without compromising safety"
+                )]
+                pub fn load_default(_directory_or_app_id: &str) -> Self {
+                    panic!(
+                        "load_default() has been removed in version 3.0.0 because it bypassed safety constraints. \
+                        Use load() instead, which handles errors gracefully while maintaining the single-instance guarantee. \
+                        See the documentation for more details."
+                    );
                 }
 
                 /// Loads preferences into a temporary location for testing (ignores the single-instance constraint).
@@ -252,8 +326,8 @@ macro_rules! easy_prefs {
                 /// Loads preferences into a temporary location for testing (ignores the single-instance constraint).
                 #[cfg(target_arch = "wasm32")]
                 pub fn load_testing() -> Self {
-                    let test_id = format!("test_{}", std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
+                    let test_id = format!("test_{}", $crate::web_time::SystemTime::now()
+                        .duration_since($crate::web_time::UNIX_EPOCH)
                         .unwrap()
                         .as_millis());
                     let storage = $crate::storage::create_storage(&test_id);
@@ -335,7 +409,7 @@ macro_rules! easy_prefs {
                     [<$name EditGuard>] {
                         preferences: self,
                         modified: false,
-                        created: std::time::Instant::now()
+                        created: $crate::web_time::Instant::now()
                     }
                 }
             }
@@ -344,7 +418,7 @@ macro_rules! easy_prefs {
             $vis struct [<$name EditGuard>]<'a> {
                 preferences: &'a mut $name,
                 modified: bool,
-                created: std::time::Instant,
+                created: $crate::web_time::Instant,
             }
 
             impl<'a> [<$name EditGuard>]<'a> {
@@ -390,7 +464,7 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Barrier, Mutex};
     use std::thread;
-    use std::time::Duration;
+    use web_time::Duration;
 
     #[cfg(debug_assertions)]
     easy_prefs! {
@@ -417,7 +491,6 @@ mod tests {
     }
 
     /// Tests loading and saving using `load_testing()` (ignores the single-instance constraint).
-    #[test]
     fn test_load_save_preferences_with_macro() {
         let mut prefs = TestEasyPreferences::load_testing();
         assert_eq!(prefs.get_bool1_default_true(), &true);
@@ -443,7 +516,6 @@ mod tests {
     }
 
     /// Tests the edit guard batching and save-on-drop functionality.
-    #[test]
     fn test_edit_guard() {
         let mut prefs = TestEasyPreferences::load_testing();
         {
@@ -465,7 +537,6 @@ mod tests {
     }
 
     /// Tests multithreading with Arc/Mutex using `load_testing()`.
-    #[test]
     fn test_with_arc_mutex() {
         let prefs = Arc::new(Mutex::new(TestEasyPreferences::load_testing()));
         {
@@ -485,44 +556,45 @@ mod tests {
     /// Combined test for real file operations and the single-instance constraint.
     ///
     /// Running these tests sequentially avoids conflicts caused by the single-instance flag.
-    #[test]
     fn test_real_preferences_and_single_instance() {
         // --- Part 1: Test persistence and schema upgrades ---
-        let path = {
-            let prefs = TestEasyPreferences::load("/tmp/tests/").expect("Failed to load");
-            prefs.get_preferences_file_path()
-        };
-        let _ = std::fs::remove_file(&path); // Clean up any previous run
+        {
+            let path = {
+                let prefs = TestEasyPreferences::load("/tmp/tests/");
+                prefs.get_preferences_file_path()
+            };
+            let _ = std::fs::remove_file(&path); // Clean up any previous run
 
-        // Save some values.
-        {
-            let mut prefs = TestEasyPreferences::load("/tmp/tests/").expect("Failed to load");
-            prefs
-                .save_bool1_default_true(false)
-                .expect("Failed to save bool1");
-            prefs.edit().set_string1("test1".to_string());
-        }
-        // Verify persistence.
-        {
-            let prefs = TestEasyPreferences::load("/tmp/tests/").expect("Failed to load");
-            assert_eq!(prefs.get_bool1_default_true(), &false);
-            assert_eq!(prefs.get_string1(), "test1");
-        }
-        // Test schema evolution.
-        {
-            let prefs =
-                TestEasyPreferencesUpdated::load("/tmp/tests/").expect("Failed to load updated");
-            assert_eq!(prefs.get_bool2_default_true_renamed(), &true); // Default (not saved earlier)
-            assert_eq!(prefs.get_string1(), "test1");
-            assert_eq!(prefs.get_string2(), "new default value");
-        }
+            // Save some values.
+            {
+                let mut prefs = TestEasyPreferences::load("/tmp/tests/");
+                prefs
+                    .save_bool1_default_true(false)
+                    .expect("Failed to save bool1");
+                prefs.edit().set_string1("test1".to_string());
+            }
+            // Verify persistence.
+            {
+                let prefs = TestEasyPreferences::load("/tmp/tests/");
+                assert_eq!(prefs.get_bool1_default_true(), &false);
+                assert_eq!(prefs.get_string1(), "test1");
+            }
+            // Test schema evolution.
+            {
+                let prefs = TestEasyPreferencesUpdated::load("/tmp/tests/");
+                assert_eq!(prefs.get_bool2_default_true_renamed(), &true); // Default (not saved earlier)
+                assert_eq!(prefs.get_string1(), "test1");
+                assert_eq!(prefs.get_string2(), "new default value");
+            }
+        } // All instances from part 1 are now dropped
 
         // --- Part 2: Test the single-instance constraint ---
         let barrier = Arc::new(Barrier::new(2));
         let barrier_clone = barrier.clone();
 
+        let test_dir = "/tmp/test_instance_conflict/";
         let handle = thread::spawn(move || {
-            let prefs = TestEasyPreferences::load("/tmp/tests/").expect("Failed to load");
+            let prefs = TestEasyPreferences::load_with_error(test_dir).expect("Failed to load");
             barrier_clone.wait(); // Hold instance until main thread tries to load.
             thread::sleep(Duration::from_millis(100));
             drop(prefs); // Release instance.
@@ -530,17 +602,39 @@ mod tests {
         });
 
         barrier.wait(); // Synchronize with spawned thread.
-        let result = TestEasyPreferences::load("com.example.app");
+        let result = TestEasyPreferences::load_with_error(test_dir);
         assert!(matches!(result, Err(LoadError::InstanceAlreadyLoaded)));
 
         handle.join().unwrap(); // Wait for thread to finish.
 
         // Verify instance can be loaded after release.
-        let _prefs =
-            TestEasyPreferences::load("com.example.app").expect("Failed to load after drop");
+        let _prefs = TestEasyPreferences::load(test_dir);
 
         // Verify that `load_testing()` ignores the single-instance constraint.
         let _test1 = TestEasyPreferences::load_testing();
         let _test2 = TestEasyPreferences::load_testing();
+    }
+
+    /// Test that the new load() API panics on errors in debug mode
+    #[test]
+    #[should_panic(expected = "Failed to load preferences")]
+    #[cfg(debug_assertions)]
+    fn test_load_panics_on_error_in_debug() {
+        let test_dir = "/tmp/tests_panic/";
+
+        // First load should succeed
+        let _prefs1 = TestEasyPreferences::load(test_dir);
+
+        // Second load should panic due to instance already loaded
+        let _prefs2 = TestEasyPreferences::load(test_dir);
+    }
+
+    #[test]
+    fn test_all() {
+        // Run all tests sequentially to avoid conflicts with the single-instance constraint
+        test_load_save_preferences_with_macro();
+        test_edit_guard();
+        test_with_arc_mutex();
+        test_real_preferences_and_single_instance();
     }
 }
