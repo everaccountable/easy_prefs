@@ -326,8 +326,8 @@ macro_rules! easy_prefs {
                 /// Loads preferences into a temporary location for testing (ignores the single-instance constraint).
                 #[cfg(target_arch = "wasm32")]
                 pub fn load_testing() -> Self {
-                    let test_id = format!("test_{}", web_time::SystemTime::now()
-                        .duration_since(web_time::UNIX_EPOCH)
+                    let test_id = format!("test_{}", $crate::web_time::SystemTime::now()
+                        .duration_since($crate::web_time::UNIX_EPOCH)
                         .unwrap()
                         .as_millis());
                     let storage = $crate::storage::create_storage(&test_id);
@@ -409,7 +409,7 @@ macro_rules! easy_prefs {
                     [<$name EditGuard>] {
                         preferences: self,
                         modified: false,
-                        created: web_time::Instant::now()
+                        created: $crate::web_time::Instant::now()
                     }
                 }
             }
@@ -418,7 +418,7 @@ macro_rules! easy_prefs {
             $vis struct [<$name EditGuard>]<'a> {
                 preferences: &'a mut $name,
                 modified: bool,
-                created: web_time::Instant,
+                created: $crate::web_time::Instant,
             }
 
             impl<'a> [<$name EditGuard>]<'a> {
